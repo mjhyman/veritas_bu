@@ -1,0 +1,9 @@
+[submodule "vesselsynth"]
+	path = vesselsynth
+	url = ./vesselsynth
+[submodule "cornucopia"]
+	path = cornucopia
+	url = ./cornucopia
+[submodule "vesselseg"]
+	path = vesselseg
+	url = ./vesselseg
