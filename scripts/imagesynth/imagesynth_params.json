@@ -1,0 +1,6 @@
+{
+    "path": "/autofs/cluster/octdata2/users/epc28/veritas/output/synthetic_data/exp0001",
+    "name": "RandomGammaNoiseTransform_Fixed-1_Uniform-0.2-0.6",
+    "gamma": [0.5, 2],
+    "noise": [0.2, 0.6]
+}

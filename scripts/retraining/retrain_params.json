@@ -1,0 +1,20 @@
+{
+    "paths": {
+        "data": "/autofs/cluster/octdata2/users/epc28/veritas/output/synthetic_data/exp0001",
+        "vesselseg_dir": "/autofs/cluster/octdata2/users/epc28/veritas/vesselseg",
+        "version": 13
+    },
+
+    "data": {
+        "n_volumes": 975,
+        "shape": 256,
+        "train_to_val_ratio": 0.8
+    },
+
+    "params": {
+        "train_batch_size": 3,
+        "val_batch_size": 1,
+        "epochs": 1000,
+        "switch_to_dice_epoch": 50
+    }
+}

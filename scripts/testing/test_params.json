@@ -1,0 +1,19 @@
+{
+
+    "paths": {
+        "model": "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_0",
+        "data": "/autofs/cluster/octdata2/users/epc28/veritas/output/synthetic_data/exp0001"
+    },
+
+
+    "data": {
+        "n_volumes": 975,
+        "shape": 256,
+        "train_to_val_ratio": 0.8
+    },
+
+    "params": {
+        "threshold": 0.25,
+        "best_or_last": "best"
+    }
+}
