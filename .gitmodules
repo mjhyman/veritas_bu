@@ -3,7 +3,7 @@
 	url = ./vesselsynth
 [submodule "cornucopia"]
 	path = cornucopia
-	url = ./cornucopia
+	url = https://github.com/balbasty/cornucopia/
 [submodule "vesselseg"]
 	path = vesselseg
 	url = ./vesselseg

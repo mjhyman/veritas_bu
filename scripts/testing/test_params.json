@@ -1,10 +1,11 @@
 {
 
     "paths": {
+        "real_or_synth": "real",
+        "real": "",
         "model": "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_0",
         "data": "/autofs/cluster/octdata2/users/epc28/veritas/output/synthetic_data/exp0001"
     },
-
 
     "data": {
         "n_volumes": 975,

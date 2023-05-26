@@ -1,6 +1,13 @@
 \scripts/videos/*
 \output/*
-
+*.ipynb
+*.tiff
+*.tif
+*.nii
+*.gz
+*.gif
+*.log
+*.png
 
 # Distribution / packaging
 .Python
