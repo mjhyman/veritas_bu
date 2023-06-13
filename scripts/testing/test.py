@@ -117,7 +117,7 @@ class Predict(object):
         
         # Getting image name and making output file path
         image_name = in_path.split("/")[-1].split(".")[0]
-        self.out_path = f"/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_0/predictions/real_data/prediction_volumes/mus_vessel_{image_name}_PREDICTION.nii.gz"
+        self.out_path = f"/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_2/predictions/real_vols/mus_vessel_{image_name}_PREDICTION.nii.gz"
 
         # Loading data from disk
         print(f"{Clock().now()} Loading data")

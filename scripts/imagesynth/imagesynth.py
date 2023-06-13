@@ -76,8 +76,6 @@ class VesselSynth(object):
 
         #print(label_object.dataobj)
         
-
-        
         #print(label_object.get_fdata())
 
                 

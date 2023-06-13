@@ -8,6 +8,11 @@
 *.gif
 *.log
 *.png
+predictions/
+oct_volumes/
+real_data/
+synthetic_data/
+
 
 # Distribution / packaging
 .Python

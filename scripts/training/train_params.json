@@ -1,30 +1,29 @@
 {
     "paths": {
-        "version": 0,
-        "data": "/autofs/cluster/octdata2/users/epc28/veritas/output/synthetic_data/exp0001",
-        "vesselseg_dir": "/autofs/cluster/octdata2/users/epc28/veritas/vesselseg"
+        "version": 1,
+        "data": "/autofs/cluster/octdata2/users/epc28/veritas/output/real_data/augmented",
+        "vesselseg_dir": "/autofs/cluster/octdata2/users/epc28/veritas/output"
     },
     "data": {
-        "n_volumes": 975,
-        "shape": 256,
+        "n_volumes": 1000,
+        "shape": 64,
         "train_to_val_ratio": 0.8
     },
     "model_architecture": {
-        "nb_levels": 4,
+        "nb_levels": 3,
         "nb_features": [
-            32,
-            32,
-            64,
-            128
+            128,
+            256,
+            512
         ],
-        "dropout": 0.1,
+        "dropout": 0.05,
         "nb_conv": 2,
         "kernel_size": 3,
         "activation": "ReLU"
     },
     "params": {
-        "train_batch_size": 1,
-        "val_batch_size": 1,
+        "train_batch_size": 10,
+        "val_batch_size": 5,
         "epochs": 1000,
         "switch_to_dice_epoch": 50
     }
