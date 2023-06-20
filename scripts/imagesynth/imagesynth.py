@@ -29,7 +29,6 @@ class VesselSynth(object):
 
         label_object = nib.load(self.label_paths[0]) # Change this back to "label_path" in for loop for production ru
         label_tensor = torch.as_tensor(label_object.get_fdata(), dtype=torch.bool, device='cuda').squeeze()[None, None]
-
         label_tensor.to('cuda')
         
         for iteration in range(0, 8):
@@ -39,10 +38,11 @@ class VesselSynth(object):
             #prob = prob.int()
 
             volume_name = f"volume-{0:04d}_augmentation-{iteration:04d}"
+            print(volume_name)
             
-            nib.save(nib.Nifti1Image(im, affine=label_object.affine), f'{self.nifti_dir}/{volume_name}.nii.gz')
-            Image.fromarray(im[im.shape[0] // 2]).save(f'{self.tiff_dir}/{volume_name}.tiff')
-            print("Saved: ", volume_name)
+            #nib.save(nib.Nifti1Image(im, affine=label_object.affine), f'{self.nifti_dir}/{volume_name}.nii.gz')
+            #Image.fromarray(im[im.shape[0] // 2]).save(f'{self.tiff_dir}/{volume_name}.tiff')
+            #print("Saved: ", volume_name)
 
                 #i += 1
 
