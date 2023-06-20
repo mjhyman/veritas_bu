@@ -27,11 +27,6 @@ class VesselSynth(object):
 
         self.dirsOK()
 
-        #i = 0
-            
-        #for label_path in self.label_paths:
-            #while i < 5:
-
         label_object = nib.load(self.label_paths[0]) # Change this back to "label_path" in for loop for production ru
         label_tensor = torch.as_tensor(label_object.get_fdata(), dtype=torch.bool, device='cuda').squeeze()[None, None]
 
@@ -78,5 +73,6 @@ class VesselSynth(object):
         
         #print(label_object.get_fdata())
 
-                
-VesselSynth().main()
+
+if __name__ == "__main__":
+    VesselSynth().main()

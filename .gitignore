@@ -12,6 +12,7 @@ predictions/
 oct_volumes/
 real_data/
 synthetic_data/
+sandbox/
 
 
 # Distribution / packaging

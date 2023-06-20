@@ -1,9 +1,9 @@
 [submodule "vesselsynth"]
 	path = vesselsynth
-	url = ./vesselsynth
+	url = https://github.com/balbasty/vesselsynth
 [submodule "cornucopia"]
 	path = cornucopia
 	url = https://github.com/balbasty/cornucopia/
 [submodule "vesselseg"]
 	path = vesselseg
-	url = ./vesselseg
+	url = https://github.com/balbasty/vesselseg/
