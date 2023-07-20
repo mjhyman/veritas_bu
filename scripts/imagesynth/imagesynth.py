@@ -13,10 +13,20 @@ import torch
 
 from PIL import Image
 
+
+imagesynth_params = {
+    "path": "/autofs/cluster/octdata2/users/epc28/veritas/output/synthetic_data/exp0008",
+    "name": "imagesynth",
+    "gamma": [0.5, 2],
+    "noise": [0.2, 0.6]
+}
+
+
 class VesselSynth(object):
     
     def __init__(self):
-        self.imagesynth_params = json.load(open("vesselseg/scripts/imagesynth/imagesynth_params.json"))
+        #self.imagesynth_params = json.load(open("vesselseg/scripts/imagesynth/imagesynth_params.json"))
+        self.imagesynth_params = imagesynth_params
         self.data_dir = self.imagesynth_params["path"]
         self.name = self.imagesynth_params['name']
         self.label_paths = glob.glob(f"{self.data_dir}/*label*")
@@ -24,11 +34,9 @@ class VesselSynth(object):
         self.tiff_dir = f"{self.data_dir}/volumes/{self.name}/tiffs"
 
     def main(self):
-
         self.dirsOK()
-
         label_object = nib.load(self.label_paths[0]) # Change this back to "label_path" in for loop for production ru
-        label_tensor = torch.as_tensor(label_object.get_fdata(), dtype=torch.bool, device='cuda').squeeze()[None, None]
+        label_tensor = torch.as_tensor(label_object.get_fdata(), dtype=torch.float, device='cuda').squeeze()[None, None]
         label_tensor.to('cuda')
         
         for iteration in range(0, 8):
@@ -38,12 +46,12 @@ class VesselSynth(object):
             #prob = prob.int()
 
             volume_name = f"volume-{0:04d}_augmentation-{iteration:04d}"
-            print(volume_name)
-            
-            #nib.save(nib.Nifti1Image(im, affine=label_object.affine), f'{self.nifti_dir}/{volume_name}.nii.gz')
+            out_path = f'{self.nifti_dir}/{volume_name}.nii.gz'
+        
+            nib.save(nib.Nifti1Image(im, affine=label_object.affine), out_path)
             #Image.fromarray(im[im.shape[0] // 2]).save(f'{self.tiff_dir}/{volume_name}.tiff')
-            #print("Saved: ", volume_name)
 
+            print("Saved to: ", out_path)
                 #i += 1
 
     def dirsOK(self):
@@ -57,21 +65,6 @@ class VesselSynth(object):
             os.makedirs(self.tiff_dir)
         else:
             [os.remove(x) for x in glob.glob(f"{self.tiff_dir}/*")]
-
-    def main2(self):
-
-        sys.path.append("../vesselseg")
-
-        from torch.utils import data
-        from vesselseg.synth import SynthVesselDataset, SynthVesselImage
-
-        label_object = nib.load(self.label_paths[0])
-        #t = torch.as_tensor(label_object.get_fdata(), dtype=torch.bool, device='cuda')
-        #print(t)
-
-        #print(label_object.dataobj)
-        
-        #print(label_object.get_fdata())
 
 
 if __name__ == "__main__":

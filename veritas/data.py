@@ -1,10 +1,9 @@
 import os
-#os.getcwd()
 
 import time
 from glob import glob
 import nibabel as nib
-from torchmetrics.functional import dice
+from torchmetrics.functional import dice, jaccard_index
 
 import torch
 from torch.utils.data import Dataset
@@ -19,6 +18,19 @@ import cornucopia as cc
 #sys.path.append("veritas")
 #from veritas import models
 import models
+
+
+test_params = {
+    "step_size": 64,
+    "metric": "iou",     # "iou" or "dice"
+    "checkpoint": "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_2/checkpoints/epoch=117-val_loss=0.00095.ckpt",
+    "thresh_params":{
+        "start": 0.05,
+        "stop": 0.95,
+        "step": 0.05
+    }
+}
+
 
 class OctVolume(Dataset):
 
@@ -40,13 +52,11 @@ class OctVolume(Dataset):
             self.raw_volume_shape = self.volume_tensor.shape   
             
         # Pad each dimension individually
-        #for dim in range(len(self.raw_volume_shape)):
         self.pad_dimension()
         self.imprint_tensor = torch.zeros(self.volume_tensor.shape, dtype=self.imprint_dtype, device=self.device)
 
         # Partition volume into overlapping 3d patches
         self.get_frame_coords(step_size=self.step_size)
-        
 
 
     def __len__(self):
@@ -62,10 +72,7 @@ class OctVolume(Dataset):
         tile = self.volume_tensor[x_slice, y_slice, z_slice].to(self.volume_dtype).detach()
         prediction = self.trainee(tile.unsqueeze(0).unsqueeze(0).to('cuda'))
         prediction = torch.sigmoid(prediction).squeeze().squeeze().detach()
-        #prediction[prediction >= 0.8] = 1
-        #prediction[prediction < 0.8] = 0
         
-        #prediction = prediction.to(torch.int)
         self.imprint_tensor[x_slice, y_slice, z_slice] += prediction
 
         return tile, prediction
@@ -74,7 +81,7 @@ class OctVolume(Dataset):
     def predict(self):
         '''Predict on all patches within 3d volume via getitem function. Normalize resultant imprint and strip padding.'''
         # Normalizing
-        #self.volume_tensor = cc.QuantileTransform(pmin=0, pmax=1, vmin=0.05, vmax=0.95, clamp=False)(self.volume_tensor + 0.000001)
+        self.volume_tensor = cc.QuantileTransform(pmin=0, pmax=1, vmin=0.05, vmax=0.95, clamp=False)(self.volume_tensor + 0.000001)
         length = self.__len__()
         print("Predicting on", length, 'patches')
         for i in range(length):
@@ -86,9 +93,6 @@ class OctVolume(Dataset):
 
         self.volume_tensor = self.volume_tensor[s, s, s]
         self.imprint_tensor = self.imprint_tensor[s, s, s]
-        #self.imprint_tensor[self.imprint_tensor >= threshold] = 1
-        #self.imprint_tensor[self.imprint_tensor <= threshold] = 0
-        #self.imprint_tensor = self.imprint_tensor.to(torch.int)
 
 
     def pad_dimension(self):
@@ -98,8 +102,6 @@ class OctVolume(Dataset):
                 padding = torch.ones(1, 6, dtype=torch.int) * self.tile_size
                 padding = tuple(*padding)
                 self.volume_tensor = torch.nn.functional.pad(self.volume_tensor, padding, 'reflect').squeeze()
-                #self.volume_tensor = torch.nn.functional.pad(self.volume_tensor, padding, 'constant').squeeze()
-                #self.volume_tensor = self.volume_tensor.squeeze()
             else:
                 print('Input tensor has shape', self.volume_tensor.shape)
 
@@ -135,15 +137,21 @@ class OctVolume(Dataset):
 
 
 def findthresh(prediction, ground_truth):
-    threshold_lst = np.arange(0.05, 1, 0.05)
+    prediction = prediction / torch.max(prediction)
+    threshold_lst = np.arange(test_params["thresh_params"]["start"], test_params["thresh_params"]["stop"], test_params["thresh_params"]["step"])
     lst = []
     for thresh in threshold_lst:
         prediction_temp = prediction.clone()
         prediction_temp[prediction_temp >= thresh] = 1
         prediction_temp[prediction_temp < thresh] = 0
-        dice_coeff = dice(prediction_temp, ground_truth, multiclass=False)
-        lst.append(dice_coeff.tolist())
+        if test_params["metric"] == 'dice':
+            metric = dice(prediction_temp, ground_truth, multiclass=False)
+        elif test_params["metric"] == "iou":
+            metric = jaccard_index(preds=prediction_temp, target=ground_truth, task="binary")
+        else:
+            print("I don't know that metric!")
 
+        lst.append(metric.tolist())
     mx = max(lst)
     mx_idx = lst.index(mx)
     return threshold_lst[mx_idx], lst[mx_idx]
@@ -152,21 +160,18 @@ def findthresh(prediction, ground_truth):
 if __name__ == "__main__":
     t1 = time.time()
     #volume_path = "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_0/predictions/real_data/oct_volumes/I_mosaic_0_0_0.mgz"
-    #volume_path = "/autofs/cluster/octdata2/users/epc28/veritas/sandbox/tiles/volume-0001.nii"
     volume_path = "/cluster/octdata/users/cmagnain/190312_I46_SomatoSensory/I46_Somatosensory_20um_crop.nii"
-    model_path = "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_0"
-    out_file = "prediction_16x-avg.nii"
+    model_path = "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_2"
 
-    unet = models.UNet(model_path)
-    oct = OctVolume(volume_path, unet.trainee, tile_size=unet.model_params['data']['shape'], step_size=64)
+    unet = models.UNet(model_path, test_params["checkpoint"])
+    oct = OctVolume(volume_path, unet.trainee, tile_size=unet.model_params['data']['shape'], step_size=test_params["step_size"])
 
     with torch.no_grad():
 
         oct.predict()
         x, y = oct.volume_tensor.cpu().numpy(), oct.imprint_tensor.cpu().numpy()
-
-        nifti = nib.nifti1.Nifti1Image(y, affine=oct.volume_affine, header=oct.volume_header)
-        savedir = f"{model_path}/predictions/caroline_data/"
+        
+        savedir = f"{model_path}/predictions/caroline_data"
         os.makedirs(savedir, exist_ok=True)
         
         ground_truth = f"{savedir}/ground_truth.nii"
@@ -174,19 +179,20 @@ if __name__ == "__main__":
         ground_truth_tensor = torch.tensor(ground_truth_nifti.get_fdata(), dtype=torch.int).to('cuda')
         ground_truth_tensor[ground_truth_tensor >= 1] = 1
 
-        best_threshold, best_dice_score = findthresh(oct.imprint_tensor, ground_truth_tensor)
-        best_dice_score = round(best_dice_score, 3)
-        best_threshold = round(best_threshold, 2)
+        best_threshold, best_acc = findthresh(oct.imprint_tensor, ground_truth_tensor)
+        best_acc = round(best_acc, 3)
+        best_threshold = round(best_threshold, 3)
 
         #dice_coeff = round(dice(oct.imprint_tensor, ground_truth_tensor, multiclass=False).tolist(), 3)
         print("\nThreshold =", best_threshold)
-        print('\nDICE =', best_dice_score)
+        print('\nDICE =', best_acc)
 
         y = oct.imprint_tensor.cpu().numpy()
         y[y >= best_threshold] = 1
         y[y < best_threshold] = 0
+        nifti = nib.nifti1.Nifti1Image(y, affine=oct.volume_affine, header=oct.volume_header)
 
-        out_file = f"prediction_stepsz-{step_size}_thresh-{best_threshold}_dice-{best_dice_score}.nii"
+        out_file = f"prediction_stepsz-{test_params['step_size']}_thresh-{best_threshold}_{test_params['metric']}-{best_acc}.nii"
         print('\n', f"Saving to {out_file}")
         nib.save(nifti , f"{model_path}/predictions/caroline_data/{out_file}")
 
@@ -202,3 +208,24 @@ if __name__ == "__main__":
     #axarr[0].imshow(np.max(y, axis=0), cmap='magma')
     #axarr[1].imshow(np.max(y, axis=1), cmap='magma')
     #axarr[2].imshow(np.max(y, axis=2), cmap='magma')
+
+x_paths = sorted(glob("/autofs/cluster/octdata2/users/epc28/veritas/output/real_data/augmented/x_train/*"))
+y_paths = sorted(glob("/autofs/cluster/octdata2/users/epc28/veritas/output/real_data/augmented/y_train/*"))
+
+
+class AugmentedVolumes(Dataset):
+    def __init__(self, x_paths, y_paths, device="cuda", subset=-1, transform=None, target_transform=None):
+        self.device = device
+        self.x_paths = x_paths[:subset]
+        self.y_paths = y_paths[:subset]
+
+    def __len__(self):
+        return len(self.x_paths)
+
+    def __getitem__(self, idx):
+        with torch.no_grad():
+            x = torch.tensor(nib.load(self.x_paths[idx]).get_fdata(), dtype=torch.float, device=self.device)
+            y = torch.tensor(nib.load(self.x_paths[idx]).get_fdata(), dtype=torch.float, device=self.device)
+            
+        return x, y
+    

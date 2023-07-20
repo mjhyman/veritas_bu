@@ -44,7 +44,6 @@ class CustomImageDataset(Dataset):
     def __getitem__(self, idx):
         image = cc.LoadTransform(dtype=self.dtype, device=self.device)(self.x_path[idx])
         label = cc.LoadTransform(dtype=self.dtype, device=self.device)(self.y_path[idx])
-        #image, label = Augmentation(64).run(image, label)
         return image, label
 
 

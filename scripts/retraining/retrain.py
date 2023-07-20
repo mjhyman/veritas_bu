@@ -25,6 +25,7 @@ class Train(object):
     def __init__(self):
         self.version_path = f"{retrain_params['paths']['vesselseg_dir']}/models/version_{retrain_params['paths']['version']}"
         self.last_checkpoint = f"{self.version_path}/checkpoints/last.ckpt"
+
         self.train_params = json.load(open(f"{self.version_path}/train_params.json"))
 
         self.logger = TensorBoardLogger(self.train_params['paths']['vesselseg_dir'], name="models", version=self.train_params['paths']['version'])
@@ -37,6 +38,8 @@ class Train(object):
         self.losses = {0: LogitMSELoss(labels=[1]), self.train_params['params']['switch_to_dice_epoch']: DiceLoss(labels=[1], activation='Sigmoid')}
         self.metrics = nn.ModuleDict({'dice': self.losses[self.train_params['params']['switch_to_dice_epoch']], 'logitmse': self.losses[0]})
         self.trainee = SupervisedTrainee(self.segnet, loss=self.losses[0], augmentation=self.synth, metrics=self.metrics)
+
+        
         self.FTtrainee = FineTunedTrainee.load_from_checkpoint(checkpoint_path=self.last_checkpoint, trainee=self.trainee, loss=self.losses)
         self.checkpoint_callback = ModelCheckpoint(monitor="val_metric_dice", mode="min", every_n_epochs=1, save_last=True, filename='{epoch}-{val_loss:.5f}')
         

@@ -10,12 +10,14 @@ sys.path.append("/autofs/cluster/octdata2/users/epc28/veritas/vesselseg")
 from vesselseg import networks, losses, train
 
 class UNet(object):
-        def __init__(self, model_path):
+
+
+        def __init__(self, model_path, checkpoint):
                 self.model_path = model_path
                 self.device = "cuda"
                 self.best_or_last = "best"
                 self.model_params = json.load(open(f'{self.model_path}/train_params.json'))
-                self.checkpoint = self.which_checkpoint()
+                self.checkpoint = checkpoint
 
                 # U-Net paths
                 self.model = networks.SegNet(3, 1, 1, activation=None, backbone="UNet", kwargs_backbone=(self.model_params['model_architecture']))
@@ -27,7 +29,7 @@ class UNet(object):
                 trainee = self.trainee.trainee
                 trainee = trainee.to(self.device)
                 trainee = trainee.eval()
-                self.threshold = 0.10
+
 
         def which_checkpoint(self):
                 checkpoint_paths = glob(f"{self.model_path}/checkpoints/*")
@@ -42,4 +44,3 @@ class UNet(object):
                 else:
                         print("I don't know which checkpoint to use :(")
                 return checkpoint_path_used
-

@@ -2,7 +2,7 @@ import os
 import sys
 import json
 import torch
-import interpol
+#import interpol
 import nibabel as nib
 
 sys.path.append("vesselsynth/")
@@ -11,7 +11,11 @@ from vesselsynth.io import default_affine
 from vesselsynth.save_exp import SaveExp
 
 # Use faster jitfield backend to compute splines
-interpol.backend.jitfields = True
+#interpol.backend.jitfields = True
+
+from vesselsynth import backend
+backend.jitfields = True
+
 os.environ['PYTORCH_JIT_USE_NNC_NOT_NVFUSER'] = '1'
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
@@ -37,6 +41,7 @@ class VesselSynth(object):
         self.backend(self.device)
         self.outputShape()
         for n in range(self.n_volumes):
+            print(f"Making volume {n:04d}")
             synth_key = ['prob', 'label', "level", "nb_levels", "branch", "skeleton"]
             synth_vols = SynthVesselOCT(shape=self.shape, device=self.device)()
             for i in range(len(synth_key)):

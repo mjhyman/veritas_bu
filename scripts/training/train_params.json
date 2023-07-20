@@ -10,12 +10,11 @@
         "train_to_val_ratio": 0.95
     },
     "model_architecture": {
-        "nb_levels": 4,
+        "nb_levels": 3,
         "nb_features": [
             32,
             64,
-            128,
-            256
+            128
         ],
         "dropout": 0.05,
         "nb_conv": 2,
