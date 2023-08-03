@@ -1,7 +1,7 @@
 {
     "paths": {
-        "version": 2,
-        "data": "/autofs/cluster/octdata2/users/epc28/veritas/output/synthetic_data/exp0007",
+        "version": 5,
+        "data": "/autofs/cluster/octdata2/users/epc28/veritas/output/synthetic_data/exp0008",
         "vesselseg_dir": "/autofs/cluster/octdata2/users/epc28/veritas/output"
     },
     "data": {

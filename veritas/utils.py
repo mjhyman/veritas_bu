@@ -2,12 +2,14 @@ import sys
 import torch
 import numpy as np
 import nibabel as nib
+from torchmetrics.functional import dice
 
 sys.path.append("/autofs/cluster/octdata2/users/epc28/veritas/cornucopia")
 #import cornucopia.cornucopia as cc
 import cornucopia as cc
 
-def pad_dimension(volume_tensor:torch.Tensor, tile_size:int=256, padding_method:str="replicate") -> torch.Tensor:
+def pad_dimension(volume_tensor:torch.Tensor, tile_size:int=256,
+                  padding_method:str="replicate") -> torch.Tensor:
     '''Pads all 3 dimensions of a volume with a specific mode according to patch size of unet'''
     with torch.no_grad():
         volume_tensor = volume_tensor.clone().detach().unsqueeze(0)
@@ -49,7 +51,7 @@ def get_patch_coords(tensor:torch.Tensor, tile_size:int=256, step_size:int=256) 
 #coords = get_patch_coords(tensor, 256, 64)
 #coords
 
-def volprep(path:str, binary: bool=False, device: str="cpu", dtype: torch.dtype=torch.float, vmin:float=0.01, vmax:float=0.99, clamp:bool=False) -> torch.Tensor:
+def volprep(path:str, binary: bool=False, device: str="cpu", dtype: torch.dtype=torch.float, vmin:float=0.05, vmax:float=0.95, clamp:bool=False) -> tuple:
     '''load, normalize, binarize, device. (returns tensor and nifti header/file info)'''
     with torch.no_grad():
         if path.split(".")[-1] == "nii":
@@ -74,9 +76,9 @@ from torch.utils.data import Dataset
 
 class OctVolume(Dataset):
 
-    def __init__(self, path:str):
-        self.tile_size = 256
-        self.step_size = 128
+    def __init__(self, path:str, tile_size:int=256, step_size:int=256):
+        self.tile_size = tile_size
+        self.step_size = step_size
         self.volume_tensor, self.volume_nifti = volprep(path)
         self.volume_tensor = pad_dimension(self.volume_tensor)
         self.complete_patch_coords = get_patch_coords(self.volume_tensor, step_size=self.step_size)
@@ -100,36 +102,89 @@ class OctVolume(Dataset):
             return tile
 
     def predict(self, trainee):
-        '''Predict on all patches within 3d volume via getitem function. Normalize resultant imprint and strip padding.'''
+        '''Predict on all patches via getitem function. Normalize resultant imprint and strip padding.'''
         length = self.__len__()
         print("Predicting on", length, 'patches')
-        for i in range(length):
-            self.__getitem__(i, prediction=True, trainee=trainee)
-            sys.stdout.write(f"\rPrediction {i + 1}/{length}")
-            sys.stdout.flush()
-        s = slice(self.tile_size, -self.tile_size)
-        # Removing Padding
-        self.volume_tensor = self.volume_tensor[s, s, s]
-        self.imprint_tensor = self.imprint_tensor[s, s, s]
+
+        with torch.no_grad():
+            for i in range(length):
+                self.__getitem__(i, prediction=True, trainee=trainee)
+                sys.stdout.write(f"\rPrediction {i + 1}/{length}")
+                sys.stdout.flush()
+            s = slice(self.tile_size, -self.tile_size)
+            
+            # Removing Padding
+            self.volume_tensor = self.volume_tensor[s, s, s]
+            self.imprint_tensor = self.imprint_tensor[s, s, s]
+            
+            # Averaging prediction
+            factors = {256 : 0, 128: 1, 64: 2, 32: 3}
+            averaging_factor = 1 / (8 ** factors[self.step_size])
+            print("\nAveraging by:", averaging_factor)
+            self.imprint_tensor = self.imprint_tensor * averaging_factor
+            self.imprint_tensor = self.imprint_tensor / torch.max(self.imprint_tensor)
 
 
-if __name__ == "__main__":
-    sys.path.append("/autofs/cluster/octdata2/users/epc28/veritas")
-    from veritas import models
+def optionsStuff(options:dict, paths:dict):
+    if isinstance(paths["ground_truth"], str):
+        pass
 
-    factors = {256 : 0,
-            128: 1,
-            64: 2}
 
-    path = "output/models/version_2/predictions/dylan_data/I_mosaic_1_1_0.nii"
-    unet = models.UNet("/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_2", "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_2/checkpoints/epoch=117-val_loss=0.00095.ckpt")
-    oct = OctVolume(path)
-    oct.predict(unet.trainee)
-    averaging_factor = 1 / (8 ** factors[oct.step_size])
-    print(averaging_factor)
-    y = oct.imprint_tensor * averaging_factor
-    y = y / torch.max(y)
-    nifti = nib.nifti1.Nifti1Image(y.cpu().numpy(), affine=oct.volume_nifti.affine, header=oct.volume_nifti.header)
-    nib.save(nifti, "/autofs/cluster/octdata2/users/epc28/veritas/test-128.nii")
+def thresholding(
+    prediction_tensor:torch.Tensor,
+    ground_truth_tensor:torch.Tensor=None,
+    threshold:bool=True,
+    auto_threshold:bool=True,
+    fixed_threshold:float=0.5,
+    compute_accuracy:bool=True
+    ) -> tuple:
+    
+    auto_threshold_settings = {
+        "start": 0.05,
+        "stop": 0.95,
+        "step": 0.05,  
+    }
 
-    #oct.__getitem__(0, prediction=True, trainee=unet.trainee)
+    #out_filename = f"prediction_stepsz{step_size}"
+
+    if threshold == True:
+        if auto_threshold == True:
+            # Decide if we can even do threshold
+            if ground_truth_tensor is None:
+                # Can't threshold because there was no gt tensor
+                print("\nCan't threshold! You didn't give me a ground truth tensor!")
+            elif isinstance(ground_truth_tensor, torch.Tensor):
+                # All good. Go on to auto thresholding
+                print("\nAuto thresholding...")
+                threshold_lst = np.arange(auto_threshold_settings["start"], auto_threshold_settings['stop'], auto_threshold_settings['step'])
+                accuracy_lst = []
+                for thresh in threshold_lst:
+                    temp = prediction_tensor.clone()
+                    temp[temp >= thresh] = 1
+                    temp[temp <= thresh] = 0
+                    accuracy = dice(temp, ground_truth_tensor, multiclass=False)
+                    accuracy_lst.append(accuracy)
+                max_index = accuracy_lst.index(max(accuracy_lst))
+                threshold, accuracy = threshold_lst[max_index], accuracy_lst[max_index]
+                # Now do the actual thresholding
+                prediction_tensor[prediction_tensor >= threshold] = 1
+                prediction_tensor[prediction_tensor <= threshold] = 0
+
+                threshold = round(threshold.item(), 3)
+                accuracy = round(accuracy.item(), 3)
+                return prediction_tensor, threshold, accuracy
+        elif auto_threshold == False:
+            # Do a fixed threshold
+            print("\nApplying a fixed threshold...")
+            prediction_tensor[prediction_tensor >= fixed_threshold] = 1
+            prediction_tensor[prediction_tensor <= fixed_threshold] = 0
+            if compute_accuracy == True:
+                accuracy = dice(prediction_tensor, ground_truth_tensor, multiclass=False)
+                accuracy = round(accuracy.item(), 3)
+            else:
+                accuracy = None
+            return prediction_tensor, fixed_threshold, accuracy
+    elif threshold == False:
+        # Return a prob map
+        print("\nNot thresholding...")
+        return prediction_tensor, None, None

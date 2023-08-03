@@ -14,9 +14,6 @@ import matplotlib.pyplot as plt
 import sys
 sys.path.append("cornucopia")
 import cornucopia as cc
-
-#sys.path.append("veritas")
-#from veritas import models
 import models
 
 
@@ -34,7 +31,9 @@ test_params = {
 
 class OctVolume(Dataset):
 
-    def __init__(self, volume_path, trainee, tile_size, step_size, subset=-1, transform=None, target_transform=None):
+    def __init__(self, volume_path:str, trainee, tile_size:int=256,
+            step_size:int=256, subset:int=-1, transform=None,
+            target_transform=None):
         self.volume_path = volume_path
         self.device = 'cuda'
         self.tile_size = tile_size
@@ -48,12 +47,14 @@ class OctVolume(Dataset):
             self.volume_nifti = nib.load(self.volume_path)
             self.volume_affine = self.volume_nifti.affine
             self.volume_header = self.volume_nifti.header
-            self.volume_tensor = torch.tensor(self.volume_nifti.get_fdata(), device=self.device, dtype=self.volume_dtype)
+            self.volume_tensor = torch.tensor(self.volume_nifti.get_fdata(),
+                device=self.device, dtype=self.volume_dtype)
             self.raw_volume_shape = self.volume_tensor.shape   
             
         # Pad each dimension individually
         self.pad_dimension()
-        self.imprint_tensor = torch.zeros(self.volume_tensor.shape, dtype=self.imprint_dtype, device=self.device)
+        self.imprint_tensor = torch.zeros(self.volume_tensor.shape,
+            dtype=self.imprint_dtype, device=self.device)
 
         # Partition volume into overlapping 3d patches
         self.get_frame_coords(step_size=self.step_size)
@@ -63,13 +64,14 @@ class OctVolume(Dataset):
         return len(self.coordlist)
 
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx=int) -> tuple:
         working_coords = self.coordlist[idx]
         x_slice = slice(*working_coords[0])
         y_slice = slice(*working_coords[1])
         z_slice = slice(*working_coords[2])
 
-        tile = self.volume_tensor[x_slice, y_slice, z_slice].to(self.volume_dtype).detach()
+        tile = self.volume_tensor[
+            x_slice, y_slice, z_slice].to(self.volume_dtype).detach()
         prediction = self.trainee(tile.unsqueeze(0).unsqueeze(0).to('cuda'))
         prediction = torch.sigmoid(prediction).squeeze().squeeze().detach()
         
@@ -79,9 +81,11 @@ class OctVolume(Dataset):
 
 
     def predict(self):
-        '''Predict on all patches within 3d volume via getitem function. Normalize resultant imprint and strip padding.'''
+        '''Predict on all patches within 3d volume via getitem function.
+            Normalize resultant imprint and strip padding.'''
         # Normalizing
-        self.volume_tensor = cc.QuantileTransform(pmin=0, pmax=1, vmin=0.05, vmax=0.95, clamp=False)(self.volume_tensor + 0.000001)
+        self.volume_tensor = cc.QuantileTransform(pmin=0, pmax=1, vmin=0.05,
+            vmax=0.95, clamp=False)(self.volume_tensor + 0.000001)
         length = self.__len__()
         print("Predicting on", length, 'patches')
         for i in range(length):
@@ -101,7 +105,9 @@ class OctVolume(Dataset):
             if len(self.volume_tensor.shape) == 4:
                 padding = torch.ones(1, 6, dtype=torch.int) * self.tile_size
                 padding = tuple(*padding)
-                self.volume_tensor = torch.nn.functional.pad(self.volume_tensor, padding, 'reflect').squeeze()
+                self.volume_tensor = torch.nn.functional.pad(
+                    self.volume_tensor, padding, 'reflect'
+                    ).squeeze()
             else:
                 print('Input tensor has shape', self.volume_tensor.shape)
 
@@ -109,10 +115,14 @@ class OctVolume(Dataset):
     def get_frame_coords(self, step_size):
         coords = []
         for dim in range(3):
-            dim_start_frame = list(np.arange(0, self.volume_tensor.shape[dim] - self.tile_size, step_size))
-            # Remove all elements from starting frame list if all they're going to get is padding
+            dim_start_frame = list(np.arange(0, self.volume_tensor.shape[dim]
+                - self.tile_size,
+                step_size))
+            # Remove all elements from starting frame list if all
+            # they're going to get is padding
             dim_start_frame.remove(0)
-            # Remove all elements from starting frame list if all they're going to get is padding
+            # Remove all elements from starting frame list if all
+            # they're going to get is padding
             dim_end_frame = [d + self.tile_size for d in dim_start_frame]
             coords.append(zip(dim_start_frame, dim_end_frame))
             
@@ -138,7 +148,10 @@ class OctVolume(Dataset):
 
 def findthresh(prediction, ground_truth):
     prediction = prediction / torch.max(prediction)
-    threshold_lst = np.arange(test_params["thresh_params"]["start"], test_params["thresh_params"]["stop"], test_params["thresh_params"]["step"])
+    threshold_lst = np.arange(
+        start=test_params["thresh_params"]["start"],
+        stop=test_params["thresh_params"]["stop"],
+        step=test_params["thresh_params"]["step"])
     lst = []
     for thresh in threshold_lst:
         prediction_temp = prediction.clone()
@@ -147,7 +160,8 @@ def findthresh(prediction, ground_truth):
         if test_params["metric"] == 'dice':
             metric = dice(prediction_temp, ground_truth, multiclass=False)
         elif test_params["metric"] == "iou":
-            metric = jaccard_index(preds=prediction_temp, target=ground_truth, task="binary")
+            metric = jaccard_index(preds=prediction_temp, target=ground_truth,
+                task="binary")
         else:
             print("I don't know that metric!")
 
@@ -164,22 +178,26 @@ if __name__ == "__main__":
     model_path = "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_2"
 
     unet = models.UNet(model_path, test_params["checkpoint"])
-    oct = OctVolume(volume_path, unet.trainee, tile_size=unet.model_params['data']['shape'], step_size=test_params["step_size"])
+    oct = OctVolume(volume_path, unet.trainee,
+        tile_size=unet.model_params['data']['shape'],
+        step_size=test_params["step_size"])
 
     with torch.no_grad():
 
         oct.predict()
-        x, y = oct.volume_tensor.cpu().numpy(), oct.imprint_tensor.cpu().numpy()
+        x, y = oct.volume_tensor.cpu().numpy(), \
+            oct.imprint_tensor.cpu().numpy()
         
         savedir = f"{model_path}/predictions/caroline_data"
         os.makedirs(savedir, exist_ok=True)
         
         ground_truth = f"{savedir}/ground_truth.nii"
         ground_truth_nifti = nib.load(ground_truth)
-        ground_truth_tensor = torch.tensor(ground_truth_nifti.get_fdata(), dtype=torch.int).to('cuda')
+        ground_truth_tensor = torch.tensor(ground_truth_nifti.get_fdata(),
+            dtype=torch.int).to('cuda')
         ground_truth_tensor[ground_truth_tensor >= 1] = 1
-
-        best_threshold, best_acc = findthresh(oct.imprint_tensor, ground_truth_tensor)
+        best_threshold, best_acc = findthresh(oct.imprint_tensor,
+            ground_truth_tensor)
         best_acc = round(best_acc, 3)
         best_threshold = round(best_threshold, 3)
 
@@ -190,7 +208,9 @@ if __name__ == "__main__":
         y = oct.imprint_tensor.cpu().numpy()
         y[y >= best_threshold] = 1
         y[y < best_threshold] = 0
-        nifti = nib.nifti1.Nifti1Image(y, affine=oct.volume_affine, header=oct.volume_header)
+        nifti = nib.nifti1.Nifti1Image(y, 
+            affine=oct.volume_affine,
+            header=oct.volume_header)
 
         out_file = f"prediction_stepsz-{test_params['step_size']}_thresh-{best_threshold}_{test_params['metric']}-{best_acc}.nii"
         print('\n', f"Saving to {out_file}")
@@ -214,7 +234,8 @@ y_paths = sorted(glob("/autofs/cluster/octdata2/users/epc28/veritas/output/real_
 
 
 class AugmentedVolumes(Dataset):
-    def __init__(self, x_paths, y_paths, device="cuda", subset=-1, transform=None, target_transform=None):
+    def __init__(self, x_paths:str, y_paths:str, device="cuda", subset=-1,
+                transform=None, target_transform=None):
         self.device = device
         self.x_paths = x_paths[:subset]
         self.y_paths = y_paths[:subset]
@@ -224,8 +245,14 @@ class AugmentedVolumes(Dataset):
 
     def __getitem__(self, idx):
         with torch.no_grad():
-            x = torch.tensor(nib.load(self.x_paths[idx]).get_fdata(), dtype=torch.float, device=self.device)
-            y = torch.tensor(nib.load(self.x_paths[idx]).get_fdata(), dtype=torch.float, device=self.device)
+            x = torch.tensor(
+                data=nib.load(self.x_paths[idx]).get_fdata(),
+                dtype=torch.float,
+                device=self.device)
+            y = torch.tensor(
+                data=nib.load(self.x_paths[idx]).get_fdata(),
+                dtype=torch.float,
+                device=self.device)
             
         return x, y
     
