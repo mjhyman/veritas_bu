@@ -6,19 +6,16 @@ from glob import glob
 
 import sys
 
-sys.path.append("/autofs/cluster/octdata2/users/epc28/veritas/vesselseg")
+#sys.path.append("/autofs/cluster/octdata2/users/epc28/veritas/vesselseg")
 from vesselseg.vesselseg import networks, losses, train
 
 class UNet(object):
 
-        def __init__(self, model_path:str, checkpoint:str):
-                self.model_path = model_path
+        def __init__(self, train_params_json:str, checkpoint:str):
+                self.train_params_json = train_params_json
                 self.device = "cuda"
-                self.best_or_last = "best"
-                self.model_params = json.load(
-                        open(f'{self.model_path}/train_params.json')
-                        )
-                self.model_params['model_architecture']['norm'] = None
+                self.model_params = json.load(open(self.train_params_json))
+                #self.model_params['model_architecture']['norm'] = None
                 self.checkpoint = checkpoint
 
                 # U-Net paths

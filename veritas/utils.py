@@ -1,7 +1,9 @@
 import sys
 import torch
 import numpy as np
+import math as pymath
 import nibabel as nib
+import matplotlib.pyplot as plt
 from torchmetrics.functional import dice
 
 sys.path.append("/autofs/cluster/octdata2/users/epc28/veritas/cornucopia")
@@ -51,7 +53,9 @@ def get_patch_coords(tensor:torch.Tensor, tile_size:int=256, step_size:int=256) 
 #coords = get_patch_coords(tensor, 256, 64)
 #coords
 
-def volprep(path:str, binary: bool=False, device: str="cpu", dtype: torch.dtype=torch.float, vmin:float=0.05, vmax:float=0.95, clamp:bool=False) -> tuple:
+def volprep(path:str, binary: bool=False, device: str="cuda",
+            dtype: torch.dtype=torch.float32, pmin:float=0, pmax:float=1,
+            vmin:float=0.05, vmax:float=0.95, clip:bool=False) -> tuple:
     '''load, normalize, binarize, device. (returns tensor and nifti header/file info)'''
     with torch.no_grad():
         if path.split(".")[-1] == "nii":
@@ -61,7 +65,10 @@ def volprep(path:str, binary: bool=False, device: str="cpu", dtype: torch.dtype=
                 tensor[tensor >= 1] = 1
                 tensor[tensor <= 0] = 0
             elif binary == False:
-                tensor = cc.QuantileTransform(pmin=0, pmax=1, vmin=vmin, vmax=vmax, clamp=clamp)(tensor)
+                pass
+                #tensor = tensor.unsqueeze(0)
+                #tensor = cc.QuantileTransform(pmin=pmin, pmax=pmax, vmin=vmin, vmax=vmax, clip=False)(tensor)
+                #tensor = tensor[0]
             tensor = tensor.to(device).to(dtype)
             return tensor, nifti
         else:
@@ -82,7 +89,7 @@ class OctVolume(Dataset):
         self.volume_tensor, self.volume_nifti = volprep(path)
         self.volume_tensor = pad_dimension(self.volume_tensor)
         self.complete_patch_coords = get_patch_coords(self.volume_tensor, step_size=self.step_size)
-        self.imprint_tensor = torch.zeros(self.volume_tensor.shape, dtype=torch.float16, device='cuda')
+        self.imprint_tensor = torch.zeros(self.volume_tensor.shape, dtype=torch.float32, device='cuda')
 
     def __len__(self):
         return len(self.complete_patch_coords)
@@ -118,11 +125,11 @@ class OctVolume(Dataset):
             self.imprint_tensor = self.imprint_tensor[s, s, s]
             
             # Averaging prediction
-            factors = {256 : 0, 128: 1, 64: 2, 32: 3}
+            factors = {256 : 0, 128: 1, 64: 2, 32: 3, 16:4}
             averaging_factor = 1 / (8 ** factors[self.step_size])
             print("\nAveraging by:", averaging_factor)
             self.imprint_tensor = self.imprint_tensor * averaging_factor
-            self.imprint_tensor = self.imprint_tensor / torch.max(self.imprint_tensor)
+            print(torch.unique(self.imprint_tensor))
 
 
 def optionsStuff(options:dict, paths:dict):
@@ -156,7 +163,11 @@ def thresholding(
             elif isinstance(ground_truth_tensor, torch.Tensor):
                 # All good. Go on to auto thresholding
                 print("\nAuto thresholding...")
-                threshold_lst = np.arange(auto_threshold_settings["start"], auto_threshold_settings['stop'], auto_threshold_settings['step'])
+                threshold_lst = np.arange(
+                    auto_threshold_settings["start"],
+                    auto_threshold_settings['stop'],
+                    auto_threshold_settings['step']
+                    )
                 accuracy_lst = []
                 for thresh in threshold_lst:
                     temp = prediction_tensor.clone()
@@ -188,3 +199,41 @@ def thresholding(
         # Return a prob map
         print("\nNot thresholding...")
         return prediction_tensor, None, None
+
+
+def volume_stats(tensor, n:int=150, stats:bool=True, zero=False, unique=False, a:int=None, b:int=None, step:float=None):    
+    if stats:
+        print("\nShape:", tensor.shape)
+        print("dtype:", tensor.dtype)
+        print("\nVolume Statistics:",'#' * 20)
+        print("Mean:", round(tensor.mean().item(), 3))
+        print("Median:", round(tensor.median().item(), 3))
+        print("StDev:", round(tensor.std().item(), 3))
+        print(f"Range: [{round(tensor.min().item(), 3)}, {round(tensor.max().item(), 3)}]")
+        # Quantiles
+        print("2nd Percentile:", round(torch.quantile(tensor, 0.02).item(), 3))
+        print("25th Percentile:", round(torch.quantile(tensor, 0.25).item(), 3))
+        print("75th Percentile:", round(torch.quantile(tensor, 0.75).item(), 3))
+        print("98th Percentile:", round(torch.quantile(tensor, 0.98).item(), 3))
+
+    img = tensor.to('cpu').numpy().squeeze()
+    if a is None:
+        a = pymath.floor(img.min())
+    if b is None:
+        b = pymath.ceil(img.max()) + 2
+    if step is None:
+        step = 1
+
+    if unique:
+        print(np.unique(img))
+    else:
+        pass
+
+    # Histogram
+    frequency, intensity = np.histogram(img, bins=np.arange(a, b, step))
+    # Figure
+    plt.figure()
+    f, axarr = plt.subplots(1, 2, figsize=(15, 8), constrained_layout=True)
+    axarr = axarr.flatten()
+    axarr[0].imshow(img[n], cmap='gray')
+    axarr[1].bar(intensity[:-1], frequency, width=0.1)

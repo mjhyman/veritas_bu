@@ -229,8 +229,8 @@ if __name__ == "__main__":
     #axarr[1].imshow(np.max(y, axis=1), cmap='magma')
     #axarr[2].imshow(np.max(y, axis=2), cmap='magma')
 
-x_paths = sorted(glob("/autofs/cluster/octdata2/users/epc28/veritas/output/real_data/augmented/x_train/*"))
-y_paths = sorted(glob("/autofs/cluster/octdata2/users/epc28/veritas/output/real_data/augmented/y_train/*"))
+#x_paths = sorted(glob("/autofs/cluster/octdata2/users/epc28/veritas/output/real_data/augmented/x_train/*"))
+#y_paths = sorted(glob("/autofs/cluster/octdata2/users/epc28/veritas/output/real_data/augmented/y_train/*"))
 
 
 class AugmentedVolumes(Dataset):
