@@ -1,7 +1,7 @@
 {
-"output_path": "/autofs/cluster/octdata2/users/epc28/veritas/output/synthetic_data/exp0008",
-"n_volumes": 1000,
-"shape": 256,
+"output_path": "/autofs/cluster/octdata2/users/epc28/veritas/output/synthetic_data/exp0009",
+"n_volumes": 10,
+"shape": 32,
 "voxel_size": 0.01,
 "tree_density": [0, 0.3],
 "tortuosity": [1, 5],

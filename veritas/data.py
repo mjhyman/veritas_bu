@@ -1,21 +1,23 @@
+__all__ = [
+    'OctVolume',
+    'AugmentedVolumes'
+]
+# Standard modules
 import os
-
+import sys
 import time
-from glob import glob
-import nibabel as nib
-from torchmetrics.functional import dice, jaccard_index
-
 import torch
-from torch.utils.data import Dataset
-
 import numpy as np
 import matplotlib.pyplot as plt
+from torch.utils.data import Dataset
+from torchmetrics.functional import dice, jaccard_index
 
-import sys
+
+# Custom modules
 sys.path.append("cornucopia")
+from veritas.models import UNet
+import nibabel as nib
 import cornucopia as cc
-import models
-
 
 test_params = {
     "step_size": 64,
@@ -30,10 +32,22 @@ test_params = {
 
 
 class OctVolume(Dataset):
+    """Loader and handler for volumetric data"""
 
     def __init__(self, volume_path:str, trainee, tile_size:int=256,
-            step_size:int=256, subset:int=-1, transform=None,
-            target_transform=None):
+                step_size:int=256):#subset:int=-1,transform=None,target_transform=None)
+        """
+        Parameters
+        ----------
+        volume_path : str
+            Abs path to volumetric data to be loaded
+        trainee: trainee
+            Trainee
+        tile_size: int
+            Size of tiles that data will be split up into
+        step_size : int
+            Change in distance between tiles
+        """
         self.volume_path = volume_path
         self.device = 'cuda'
         self.tile_size = tile_size
@@ -177,7 +191,7 @@ if __name__ == "__main__":
     volume_path = "/cluster/octdata/users/cmagnain/190312_I46_SomatoSensory/I46_Somatosensory_20um_crop.nii"
     model_path = "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_2"
 
-    unet = models.UNet(model_path, test_params["checkpoint"])
+    unet = UNet(model_path, test_params["checkpoint"])
     oct = OctVolume(volume_path, unet.trainee,
         tile_size=unet.model_params['data']['shape'],
         step_size=test_params["step_size"])
