@@ -1,5 +1,4 @@
 __all__ = [
-    'VolumeUtils',
     'Thresholding',
     'PathTools',
     'JsonTools'
@@ -11,271 +10,36 @@ import torch
 import shutil
 import numpy as np
 import math as pymath
-import nibabel as nib
-import matplotlib.pyplot as plt
-from torch.utils.data import Dataset
 from torchmetrics.functional import dice
 
 sys.path.append("/autofs/cluster/octdata2/users/epc28/veritas/cornucopia")
 import cornucopia as cc
 
-class VolumeUtils(object):
+
+class Options(object):
     """
-    Base class for volume operations
+    Base class for options.
     """
-    def __init__(self,
-                 volume:{torch.Tensor, 'path'},
-                 patch_size:int=256,
-                 step_size:int=256,
-                 pad_:bool=True,
-                 patch_coords_:bool=True
-                 ):
+    def __init__(self, cls):
+        self.cls = cls
+        self.attribute_dict = self.cls.__dict__
+
+    def out_filepath(self):
         """
-        Parameters
-        ----------
-        volume: {torch.Tensor, 'path'} |\
-            Tensor of entire volume or path to tensor.
-        volume_tensor: torch.Tensor |\
-            Tensor of entire volume.
-        patch_size: int |\
-            Size of patch with which to partition volume into.
-        step_size: int |\
-            Size of step between adjacent patch origin.
+        Determine out file name.
         """
-        self.volume=volume
-        #self.volume_tensor, self.nifti = self.volprep()
-        self.patch_size=patch_size
-        self.step_size=step_size
-        self.volume_tensor = None
-        self.volume_nifti = None
-        self.complete_patch_coords = None
-        #if pad_ == True:
-        #    print('Padding...')
-        #    self.volume_tensor= self.pad_volume()
-        #if patch_coords_ == True:
-        #    print('Computing complete patch coords...')
-        #    self.complete_patch_coords = self.patch_coords()
-        #self.volume_shape = self.volume_tensor.shape
-
-    def volprep(self,
-                binary:bool=False,
-                dtype:torch.dtype=torch.float32,
-                normalize:bool=True,
-                pmin:float=0,
-                pmax:float=1,
-                vmin:float=0.05,
-                vmax:float=0.95,
-                device:str="cuda"
-                ) -> tuple:
-        """
-        Prepare volume.
-
-        Parameters
-        ----------
-        path : str
-            Path to (nifti)
-        binary : bool
-            Binarize volume (values >= 1 set to 1, values < 1 set to 0)
-        dtype : torch.dtype
-            Load volume as this data type
-        pmin : float
-            Lower end quantile for histogram adjustment
-        pmax : float
-            Higher end quantile for histogram adjustment
-        vmin : float
-            Shift pmin to this quantile
-        vmax : float
-            Shift pmax to this quantile
-        clip : bool
-            Clip histogram that falls outside vmin and vmax
-        device : device 
-        """
-        if isinstance(self.volume, str):
-            nifti=nib.load(self.volume)
-            tensor=torch.tensor(nifti.get_fdata())
-        elif isinstance(self.volume, torch.Tensor):
-            tensor = self.volume
-            nifti = None
-        if binary == True:
-            tensor[tensor >= 1] = 1
-            tensor[tensor < 1] = 0
-        elif binary == False:
-            if normalize == True:
-                tensor = tensor.unsqueeze(0)
-                tensor = cc.QuantileTransform(pmin=pmin, pmax=pmax, vmin=vmin, vmax=vmax, clip=False)(tensor)
-                tensor = tensor[0]
-        tensor = tensor.to(device).to(dtype)
-        self.volume_tensor = tensor
-        self.volume_nifti = nifti
+        stem = ''
+        stem += f"{self.attribute_dict['volume_name']}-prediction"
+        stem += f"_stepsz-{self.attribute_dict['step_size']}"
+        try:
+            stem += f"_{self.attribute_dict['accuracy_name']}-{self.attribute_dict['accuracy_val']}"
+        except:
+            pass
+        stem += '.nii'
+        full_path = f"{self.attribute_dict['volume_dir']}/predictions/{stem}"
+        return full_path
 
 
-    def reshape(self, volume_tensor:torch.Tensor, shape:int=4) -> torch.Tensor:
-        """
-        Ensure tensor has proper shape
-
-        Parameters
-        ----------
-        shape: int |\
-            Shape that tensor needs to be.
-        """
-        if len(volume_tensor.shape) < shape:
-            volume_tensor = volume_tensor.unsqueeze(0)
-            return volume_tensor
-        elif len(volume_tensor.shape) == shape:
-            return volume_tensor
-        else:
-            print("Check the shape of your volume tensor plz.")
-            exit(0)
-
-
-    def pad_volume(self, padding_method='replicate'):
-        """
-        Pad all dimensions of 3D volume according to patch size.
-
-        Parameters
-        ----------
-        pading_method: {'replicate', 'reflect', 'constant'} |\
-            How to pad volume.
-        """
-        self.padding_method = padding_method
-        with torch.no_grad():
-            volume_tensor = self.volume_tensor.clone().detach()
-            volume_tensor = self.reshape(volume_tensor, 4)
-            padding = torch.ones(1, 6, dtype=torch.int) * self.patch_size
-            padding = tuple(*padding)
-            volume_tensor = torch.nn.functional.pad(
-                input=volume_tensor,
-                pad=padding,
-                mode=padding_method
-            ).squeeze()
-            self.volume_tensor = volume_tensor
-
-
-    def patch_coords(self):
-        """
-        Compute coords for all patches.
-        """
-        coords = []
-        complete_patch_coords = []
-        vol_shape = self.volume_tensor.shape
-        for dim in range(len(vol_shape)):
-            frame_start = np.arange(
-                0, vol_shape[dim] - self.patch_size, self.step_size
-                )[1:]
-            frame_end = [d + self.patch_size for d in frame_start]
-            coords.append(list(zip(frame_start, frame_end)))
-        if len(coords) == 3:
-            for x in coords[0]:
-                for y in coords[1]:
-                    for z in coords[2]:
-                        complete_patch_coords.append([x, y, z])
-        elif len(coords) == 2:
-            for x in coords[0]:
-                for y in coords[1]:
-                    complete_patch_coords.append([x, y])  
-        self.complete_patch_coords = complete_patch_coords
-
-
-class OctVolume(Dataset):
-    """
-    Load OCT volume and partition into patches.
-    """
-    def __init__(self, path:str, patch_size:int=256, step_size:int=256):
-        """
-        Parameters
-        ---------
-        path : str
-            Path to OCT volume
-        patch_size : int
-            Size of patches that OCT volume will be partitioned into
-        step_size : int
-            Stride length between patches
-        """
-        self.patch_size = patch_size
-        self.step_size = step_size
-        vol = VolumeUtils(path, patch_size=patch_size, step_size=step_size)
-        vol.volprep(normalize=False)
-        vol.pad_volume()
-        vol.patch_coords()
-        self.volume_tensor = vol.volume_tensor
-        self.volume_nifti = vol.volume_nifti
-        self.complete_patch_coords = vol.complete_patch_coords
-        self.imprint_tensor = torch.zeros(
-            self.volume_tensor.shape, dtype=torch.float32, device='cuda'
-            )
-
-    def __len__(self):
-        return len(self.complete_patch_coords)
-    
-    def __getitem__(self, idx:int, prediction:bool=False, trainee=None,
-                    device:str='cuda') -> tuple:
-        """
-        Load patch and predict on it.
-
-        Parameters
-        ----------
-        idx : int
-            Patch ID to load and predict on
-        prediction : bool
-            Choose whether or not to predict on patch
-        trainee : trainee
-            Trainee used to make the prediction
-        device : {'cpu', 'cuda'}
-            Device to make predictions
-        """
-        # Load patch coords
-        working_patch_coords = self.complete_patch_coords[idx]
-        # Generating slices for easy handling
-        x_slice = slice(*working_patch_coords[0])
-        y_slice = slice(*working_patch_coords[1])
-        z_slice = slice(*working_patch_coords[2])
-        # Loading patch via coords and detaching from tracking
-        patch = self.volume_tensor[x_slice, y_slice, z_slice].detach().to(device)
-        if prediction == True:
-            # Make the prediction
-            prediction = trainee(patch.unsqueeze(0).unsqueeze(0))
-            prediction = torch.sigmoid(prediction).squeeze().squeeze().detach()
-            # Add prediction to whole-volume imprint tensor
-            self.imprint_tensor[x_slice, y_slice, z_slice] += prediction
-            return patch, prediction
-        elif prediction == False:
-            return patch
-
-
-    def predict(self, trainee):
-        """
-        Predict on all patches.
-
-        Parameters
-        ----------
-        trainee : trainee
-        """
-        length = self.__len__()
-        print("Predicting on", length, 'patches')
-        with torch.no_grad():
-            # Loop through all patch coordinates
-            for i in range(length):
-                # Predict on patch
-                self.__getitem__(i, prediction=True, trainee=trainee)
-                # Log to console
-                sys.stdout.write(f"\rPrediction {i + 1}/{length}")
-                sys.stdout.flush()
-            
-            # Removing padding on volume and imprint tensors
-            s = slice(self.patch_size, -self.patch_size)
-            self.volume_tensor = self.volume_tensor[s, s, s]
-            self.imprint_tensor = self.imprint_tensor[s, s, s]
-            
-            # Averaging prediction based on step size
-            factors = {256 : 0, 128: 1, 64: 2, 32: 3, 16:4}
-            averaging_factor = 1 / (8 ** factors[self.step_size])
-            print("\nAveraging by:", averaging_factor)
-            self.imprint_tensor = self.imprint_tensor * averaging_factor
-
-
-def optionsStuff(options:dict, paths:dict):
-    if isinstance(paths["ground_truth"], str):
-        pass
 
 
 class Thresholding(object):

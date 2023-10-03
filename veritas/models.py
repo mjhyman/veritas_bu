@@ -7,7 +7,9 @@ from torch import nn
 from glob import glob
 
 # Custom packages
+sys.path.append('/autofs/cluster/octdata2/users/epc28/veritas')
 from vesselseg.vesselseg import networks, losses, train
+#from vesselseg import networks, losses, train
 
 
 class UNet(object):

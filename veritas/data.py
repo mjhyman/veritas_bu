@@ -1,272 +1,282 @@
 __all__ = [
-    'OctVolume',
-    'AugmentedVolumes'
+    'RealOct',
+    'RealOctPatchLoader',
+    'RealOctPredict'
 ]
-# Standard modules
-import os
+
 import sys
-import time
 import torch
 import numpy as np
-import matplotlib.pyplot as plt
-from torch.utils.data import Dataset
-from torchmetrics.functional import dice, jaccard_index
-
-
-# Custom modules
-sys.path.append("cornucopia")
-from veritas.models import UNet
 import nibabel as nib
+from torch.utils.data import Dataset
+
+sys.path.append("/autofs/cluster/octdata2/users/epc28/veritas/cornucopia")
 import cornucopia as cc
 
-test_params = {
-    "step_size": 64,
-    "metric": "iou",     # "iou" or "dice"
-    "checkpoint": "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_2/checkpoints/epoch=117-val_loss=0.00095.ckpt",
-    "thresh_params":{
-        "start": 0.05,
-        "stop": 0.95,
-        "step": 0.05
-    }
-}
+sys.path.append('/autofs/cluster/octdata2/users/epc28/veritas')
+from veritas.models import UNet
+from veritas.utils import Options
 
 
-class OctVolume(Dataset):
-    """Loader and handler for volumetric data"""
+class RealOct(object):
+    """
+    Base class for real OCT volumetric data.
+    """
+    def __init__(self,
+                 volume:{torch.Tensor, "path"},
+                 dtype:torch.dtype=torch.float32,
+                 patch_size:int=256,
+                 step_size:int=256,
+                 binarize:bool=False,
+                 normalize:bool=False,
+                 p_bounds:list[float]=[0, 1],
+                 v_bounds:list[float]=[0.05, 0.95],
+                 device:str='cuda',
+                 pad_:bool=True,
+                 padding_method:str='replicate',
+                 patch_coords_:bool=True
+                 ):
 
-    def __init__(self, volume_path:str, trainee, tile_size:int=256,
-                step_size:int=256):#subset:int=-1,transform=None,target_transform=None)
         """
         Parameters
         ----------
-        volume_path : str
-            Abs path to volumetric data to be loaded
-        trainee: trainee
-            Trainee
-        tile_size: int
-            Size of tiles that data will be split up into
-        step_size : int
-            Change in distance between tiles
+        volume: {torch.Tensor, 'path'}
+            Tensor of entire volume or path to nifti.
+        dtype: torch.dtype
+            Data type to load volume as.
+        patch_size: int
+            Size of patch with which to partition volume into.
+        step_size: int {256, 128, 64, 32, 16}
+            Size of step between adjacent patch origin.
+        binarize: bool
+            Whether to binarize volume.
+        normalize: bool
+            Whether to normalize volume.
+        p_bounds: list[float]
+            Bounds for normalization percentile (only if normalize=True).
+        v_bounds: list[float]
+            Bounds for histogram after normalization (only if normalize=True).
+        device: {'cuda', 'cpu'}
+            Device to load volume onto.
+        padding_method: {'replicate', 'reflect', 'constant'}
+            How to pad volume.
+
+        Attributes
+        ----------
+        volume_nifti
+            Nifti represnetation of volumetric data.
         """
-        self.volume_path = volume_path
-        self.device = 'cuda'
-        self.tile_size = tile_size
-        self.step_size = step_size
-        self.volume_dtype = torch.float
-        self.imprint_dtype = torch.float
-        self.trainee = trainee
-
-        # Get all volume specific things
+        self.volume=volume
+        self.volume_name=volume.split('/')[-1].strip('.nii')
+        self.volume_dir=volume.strip('.nii').strip(self.volume_name).strip('/')
+        self.dtype=dtype
+        self.patch_size=patch_size
+        self.step_size=step_size
+        self.binarize=binarize
+        self.normalize=normalize
+        self.p_bounds=p_bounds
+        self.v_bounds=v_bounds
+        self.device=device
+        self.padding_method=padding_method
         with torch.no_grad():
-            self.volume_nifti = nib.load(self.volume_path)
-            self.volume_affine = self.volume_nifti.affine
-            self.volume_header = self.volume_nifti.header
-            self.volume_tensor = torch.tensor(self.volume_nifti.get_fdata(),
-                device=self.device, dtype=self.volume_dtype)
-            self.raw_volume_shape = self.volume_tensor.shape   
-            
-        # Pad each dimension individually
-        self.pad_dimension()
-        self.imprint_tensor = torch.zeros(self.volume_tensor.shape,
-            dtype=self.imprint_dtype, device=self.device)
+            self.volprep()
+            self.reshape()
+            self.pad_volume()
 
-        # Partition volume into overlapping 3d patches
-        self.get_frame_coords(step_size=self.step_size)
+
+    def volprep(self):
+        """
+        Prepare volume.
+        """
+        if isinstance(self.volume, str):
+            nifti=nib.load(self.volume)
+            tensor=torch.tensor(nifti.get_fdata())
+            #self.volume_name = self.volume.split['/']
+        elif isinstance(self.volume, torch.Tensor):
+            tensor = self.volume
+            nifti = None
+        if self.binarize == True:
+            tensor[tensor >= 1] = 1
+            tensor[tensor < 1] = 0
+        elif self.binarize == False:
+            if self.normalize == True:
+                tensor = tensor.unsqueeze(0)
+                tensor = cc.QuantileTransform(
+                    pmin=self.p_bounds[0], pmax=self.p_bounds[1],
+                    vmin=self.v_bounds[0], vmax=self.v_bounds[1],
+                    clip=False
+                    )(tensor)[0]
+        tensor = tensor.to(self.device).to(self.dtype)
+        self.volume_tensor = tensor
+        self.volume_nifti = nifti
+
+
+    def reshape(self, shape:int=4) -> torch.Tensor:
+        """
+        Ensure tensor has proper shape
+
+        Parameters
+        ----------
+        shape: int
+            Shape that tensor needs to be.
+        """
+        if len(self.volume_tensor.shape) < shape:
+            self.volume_tensor = self.volume_tensor.unsqueeze(0)
+        elif len(self.volume_tensor.shape) == shape:
+            pass    
+        else:
+            print("Check the shape of your volume tensor plz.")
+            exit(0)
+
+
+    def pad_volume(self):
+        """
+        Pad all dimensions of 3D volume and update volume_tensor.
+        """
+        self.reshape(4)
+        padding = torch.ones(1, 6, dtype=torch.int) * self.patch_size
+        padding = tuple(*padding)
+        self.volume_tensor = torch.nn.functional.pad(
+            input=self.volume_tensor,
+            pad=padding,
+            mode=self.padding_method
+            ).squeeze()
+
+
+class RealOctPatchLoader(RealOct, Dataset):
+    """
+    Load volumetric patches from real oct volume data.
+
+    Example
+    -------
+    path = "/autofs/cluster/octdata2/users/epc28/veritas/data/caroline_data/I46_Somatosensory_20um_crop.nii"
+    vol = RealOctPatchLoader(volume=path, step_size=64)
+    print(vol[0])
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.patch_coords()
 
 
     def __len__(self):
-        return len(self.coordlist)
+        return len(self.complete_patch_coords)
 
 
-    def __getitem__(self, idx=int) -> tuple:
-        working_coords = self.coordlist[idx]
-        x_slice = slice(*working_coords[0])
-        y_slice = slice(*working_coords[1])
-        z_slice = slice(*working_coords[2])
-
-        tile = self.volume_tensor[
-            x_slice, y_slice, z_slice].to(self.volume_dtype).detach()
-        prediction = self.trainee(tile.unsqueeze(0).unsqueeze(0).to('cuda'))
-        prediction = torch.sigmoid(prediction).squeeze().squeeze().detach()
+    def __getitem__(self, idx:int):
+        working_patch_coords = self.complete_patch_coords[idx]
+        # Generating slices for easy handling
+        x_slice = slice(*working_patch_coords[0])
+        y_slice = slice(*working_patch_coords[1])
+        z_slice = slice(*working_patch_coords[2])
+        # Loading patch via coords and detaching from tracking
+        patch = self.volume_tensor[x_slice, y_slice, z_slice].detach().to(self.device)
+        coords = [x_slice, y_slice, z_slice]
+        return patch, coords
         
-        self.imprint_tensor[x_slice, y_slice, z_slice] += prediction
 
-        return tile, prediction
+    def patch_coords(self):
+        """
+        Compute coords for all patches.
+
+        Attributes
+        -------
+        complete_patch_coords
+            List of all patch coordinates
+        """
+        coords = []
+        complete_patch_coords = []
+        vol_shape = self.volume_tensor.shape
+        for dim in range(len(vol_shape)):
+            frame_start = np.arange(
+                0, vol_shape[dim] - self.patch_size, self.step_size
+                )[1:]
+            frame_end = [d + self.patch_size for d in frame_start]
+            coords.append(list(zip(frame_start, frame_end)))
+        if len(coords) == 3:
+            for x in coords[0]:
+                for y in coords[1]:
+                    for z in coords[2]:
+                        complete_patch_coords.append([x, y, z])
+        elif len(coords) == 2:
+            for x in coords[0]:
+                for y in coords[1]:
+                    complete_patch_coords.append([x, y])
+
+        self.complete_patch_coords = complete_patch_coords
 
 
-    def predict(self):
-        '''Predict on all patches within 3d volume via getitem function.
-            Normalize resultant imprint and strip padding.'''
-        # Normalizing
-        self.volume_tensor = cc.QuantileTransform(pmin=0, pmax=1, vmin=0.05,
-            vmax=0.95, clamp=False)(self.volume_tensor + 0.000001)
-        length = self.__len__()
-        print("Predicting on", length, 'patches')
-        for i in range(length):
-            self.__getitem__(i)
-            sys.stdout.write(f"\rPrediction {i + 1}/{length}")
+class RealOctPredict(RealOctPatchLoader, Dataset):
+    """
+    Class for whole OCT volume prediction.
+
+    Parameters
+    ----------
+    trainee
+        ML trainee.
+
+    Attributes
+    ----------
+    imprint_tensor
+        Tensor containing imprint of prediction that gets updated.
+
+    Example
+    -------
+    unet = veritas.models.UNet(train_params_json, checkpoint)
+    vol = RealOctPredict(volume, step_size, trainee=unet.trainee)
+    vol.predict_on_all()
+    vol.imprint_tensor
+    """
+    def __init__(self, trainee=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.trainee=trainee
+        self.imprint_tensor=torch.zeros(
+            self.volume_tensor.shape, device=self.device, dtype=self.dtype
+            )
+
+
+    def __getitem__(self, idx:int):
+        """
+        Predict on a single patch.
+
+        Parameters
+        ----------
+        idx : int
+            Patch ID number to predict on. Updates self.imprint_tensor.
+        """     
+        patch, coords = super().__getitem__(idx)
+        prediction = self.trainee(patch.unsqueeze(0).unsqueeze(0))
+        prediction = torch.sigmoid(prediction).squeeze().detach()
+        self.imprint_tensor[coords[0], coords[1], coords[2]] += prediction
+    
+
+    def predict_on_all(self):
+        """
+        Predict on all patches.
+        """
+        length = len(self)
+        for idx in range(len(self)):
+            self.__getitem__(idx)
+            sys.stdout.write(f"\rPrediction {idx + 1}/{length}")
             sys.stdout.flush()
 
-        s = slice(self.tile_size, -self.tile_size)
+        # Step size, then number to divide by
+        avg_factors = {256:1, 128:8, 64:64, 32:512, 16:4096}
+        self.imprint_tensor = self.imprint_tensor / avg_factors[self.step_size]
+    
 
-        self.volume_tensor = self.volume_tensor[s, s, s]
-        self.imprint_tensor = self.imprint_tensor[s, s, s]
-
-
-    def pad_dimension(self):
-        with torch.no_grad():
-            self.volume_tensor = self.volume_tensor.clone().detach().unsqueeze(0)
-            if len(self.volume_tensor.shape) == 4:
-                padding = torch.ones(1, 6, dtype=torch.int) * self.tile_size
-                padding = tuple(*padding)
-                self.volume_tensor = torch.nn.functional.pad(
-                    self.volume_tensor, padding, 'reflect'
-                    ).squeeze()
-            else:
-                print('Input tensor has shape', self.volume_tensor.shape)
-
-
-    def get_frame_coords(self, step_size):
-        coords = []
-        for dim in range(3):
-            dim_start_frame = list(np.arange(0, self.volume_tensor.shape[dim]
-                - self.tile_size,
-                step_size))
-            # Remove all elements from starting frame list if all
-            # they're going to get is padding
-            dim_start_frame.remove(0)
-            # Remove all elements from starting frame list if all
-            # they're going to get is padding
-            dim_end_frame = [d + self.tile_size for d in dim_start_frame]
-            coords.append(zip(dim_start_frame, dim_end_frame))
-            
-        for dim in range(len(coords)):
-            if dim == 0:
-                self.x_coords = [i for i in coords[dim]]
-            if dim == 1:
-                self.y_coords = [i for i in coords[dim]]
-            if dim == 2:
-                self.z_coords = [i for i in coords[dim]]
-        
-        self.coordlist = []
-        try:
-            for x in self.x_coords:
-                for y in self.y_coords:
-                    for z in self.z_coords:
-                        self.coordlist.append([x, y, z])
-        except:
-            for x in self.x_coords:
-                for y in self.y_coords:
-                    self.coordlist.append([x, y])
-
-
-def findthresh(prediction, ground_truth):
-    prediction = prediction / torch.max(prediction)
-    threshold_lst = np.arange(
-        start=test_params["thresh_params"]["start"],
-        stop=test_params["thresh_params"]["stop"],
-        step=test_params["thresh_params"]["step"])
-    lst = []
-    for thresh in threshold_lst:
-        prediction_temp = prediction.clone()
-        prediction_temp[prediction_temp >= thresh] = 1
-        prediction_temp[prediction_temp < thresh] = 0
-        if test_params["metric"] == 'dice':
-            metric = dice(prediction_temp, ground_truth, multiclass=False)
-        elif test_params["metric"] == "iou":
-            metric = jaccard_index(preds=prediction_temp, target=ground_truth,
-                task="binary")
-        else:
-            print("I don't know that metric!")
-
-        lst.append(metric.tolist())
-    mx = max(lst)
-    mx_idx = lst.index(mx)
-    return threshold_lst[mx_idx], lst[mx_idx]
-
+    def save_prediction(self):
+        """
+        Save prediction volume.
+        """
+        self.out_fname = Options(self).out_filepath()
+        print('\n', f"Saving prediction to {self.out_fname}")
 
 if __name__ == "__main__":
-    t1 = time.time()
-    #volume_path = "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_0/predictions/real_data/oct_volumes/I_mosaic_0_0_0.mgz"
-    volume_path = "/cluster/octdata/users/cmagnain/190312_I46_SomatoSensory/I46_Somatosensory_20um_crop.nii"
-    model_path = "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_2"
-
-    unet = UNet(model_path, test_params["checkpoint"])
-    oct = OctVolume(volume_path, unet.trainee,
-        tile_size=unet.model_params['data']['shape'],
-        step_size=test_params["step_size"])
-
-    with torch.no_grad():
-
-        oct.predict()
-        x, y = oct.volume_tensor.cpu().numpy(), \
-            oct.imprint_tensor.cpu().numpy()
-        
-        savedir = f"{model_path}/predictions/caroline_data"
-        os.makedirs(savedir, exist_ok=True)
-        
-        ground_truth = f"{savedir}/ground_truth.nii"
-        ground_truth_nifti = nib.load(ground_truth)
-        ground_truth_tensor = torch.tensor(ground_truth_nifti.get_fdata(),
-            dtype=torch.int).to('cuda')
-        ground_truth_tensor[ground_truth_tensor >= 1] = 1
-        best_threshold, best_acc = findthresh(oct.imprint_tensor,
-            ground_truth_tensor)
-        best_acc = round(best_acc, 3)
-        best_threshold = round(best_threshold, 3)
-
-        #dice_coeff = round(dice(oct.imprint_tensor, ground_truth_tensor, multiclass=False).tolist(), 3)
-        print("\nThreshold =", best_threshold)
-        print('\nDICE =', best_acc)
-
-        y = oct.imprint_tensor.cpu().numpy()
-        y[y >= best_threshold] = 1
-        y[y < best_threshold] = 0
-        nifti = nib.nifti1.Nifti1Image(y, 
-            affine=oct.volume_affine,
-            header=oct.volume_header)
-
-        out_file = f"prediction_stepsz-{test_params['step_size']}_thresh-{best_threshold}_{test_params['metric']}-{best_acc}.nii"
-        print('\n', f"Saving to {out_file}")
-        nib.save(nifti , f"{model_path}/predictions/caroline_data/{out_file}")
-
-    t2 = time.time()
-    print(f"\nProcess took {round(t2 - t1, 2)} [sec]")
-
-    #plt.figure()
-    ##subplot(r,c) provide the no. of rows and columns
-    #f, axarr = plt.subplots(1, 3, figsize=(20, 20), constrained_layout=True)
-    #axarr = axarr.flatten()
-
-    #f.suptitle(f'Samples from /autofs/cluster/octdata2/users/epc28/veritas/output/real_data/nonlinearly-augmented', fontsize=15)
-    #axarr[0].imshow(np.max(y, axis=0), cmap='magma')
-    #axarr[1].imshow(np.max(y, axis=1), cmap='magma')
-    #axarr[2].imshow(np.max(y, axis=2), cmap='magma')
-
-#x_paths = sorted(glob("/autofs/cluster/octdata2/users/epc28/veritas/output/real_data/augmented/x_train/*"))
-#y_paths = sorted(glob("/autofs/cluster/octdata2/users/epc28/veritas/output/real_data/augmented/y_train/*"))
-
-
-class AugmentedVolumes(Dataset):
-    def __init__(self, x_paths:str, y_paths:str, device="cuda", subset=-1,
-                transform=None, target_transform=None):
-        self.device = device
-        self.x_paths = x_paths[:subset]
-        self.y_paths = y_paths[:subset]
-
-    def __len__(self):
-        return len(self.x_paths)
-
-    def __getitem__(self, idx):
-        with torch.no_grad():
-            x = torch.tensor(
-                data=nib.load(self.x_paths[idx]).get_fdata(),
-                dtype=torch.float,
-                device=self.device)
-            y = torch.tensor(
-                data=nib.load(self.x_paths[idx]).get_fdata(),
-                dtype=torch.float,
-                device=self.device)
-            
-        return x, y
-    
+    small_vol = "/autofs/cluster/octdata2/users/epc28/veritas/data/caroline_data/I46_Somatosensory_20um_crop.nii"
+    big_vol = "/autofs/cluster/octdata2/users/epc28/veritas/data/I_mosaic_0_0_0.nii"
+    unet_params = "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_6/train_params.json"
+    checkpoint = "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_8/checkpoints/epoch=135-val_loss=0.00054.ckpt"
+    unet = UNet(train_params_json=unet_params, checkpoint=checkpoint)
+    vol = RealOctPredict(volume=small_vol, step_size=256, trainee=unet.trainee)
+    vol.predict_on_all()
+    vol.save_prediction()
