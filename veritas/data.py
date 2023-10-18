@@ -1,21 +1,120 @@
 __all__ = [
+    'ImageSynth'
     'RealOct',
     'RealOctPatchLoader',
     'RealOctPredict'
 ]
-
+import os
 import sys
+import time
 import torch
 import numpy as np
 import nibabel as nib
+import glob
 from torch.utils.data import Dataset
+import matplotlib.pyplot as plt
+
 
 sys.path.append("/autofs/cluster/octdata2/users/epc28/veritas/cornucopia")
 import cornucopia as cc
+#import cornucopia.cornucopia as cc
 
 sys.path.append('/autofs/cluster/octdata2/users/epc28/veritas')
-from veritas.models import UNet
+from veritas.utils import PathTools
+from veritas.synth import OctVolSynth
+from veritas.models import UNet, LoadUnet
 from veritas.utils import Options
+
+
+class ImageSynth(Dataset):
+    """
+    Synthesize 3D volume from vascular network.
+    """
+    def __init__(self,
+                 exp_path:str=None,
+                 device:str="cuda"
+                 ):
+        """
+        Parameters
+        ----------
+        exp_path : str
+            Path to synthetic experiment dir.
+        """
+        self.device = device
+        self.label_paths = sorted(glob.glob(f"{exp_path}/*label*"))
+        self.sample_fig_dir = f"{exp_path}/sample_vols/figures"
+        self.sample_nifti_dir = f"{exp_path}/sample_vols/niftis"
+        PathTools(self.sample_nifti_dir).makeDir()
+        PathTools(self.sample_fig_dir).makeDir()
+
+
+    def __len__(self) -> int:
+        return len(self.label_paths)
+
+
+    def __getitem__(self, idx:int, save_nifti=False, make_fig=False,
+                    save_fig=False) -> tuple:
+        """
+        Parameters
+        ----------
+        idx : int
+            Volume ID number.
+        save_nifti : bool
+            Save volume as nifti to sample dir.
+        make_fig : bool
+            Make figure and print it to ipynb output.
+        save_fig : bool
+            Generate and save figure to sample dir.
+        """
+        # Loading nifti and affine
+        nifti = nib.load(self.label_paths[idx])
+        volume_affine = nifti.affine
+        # Loading and processing volume tensor
+        volume_tensor = torch.from_numpy(nifti.get_fdata()).to(self.device)
+        # Reshaping
+        volume_tensor = volume_tensor.squeeze()[None, None]
+        # Synthesizing volume
+        im, prob = OctVolSynth()(volume_tensor)
+        # Converting image and prob map to numpy. Reshaping
+        im = im.detach().cpu().numpy().squeeze().squeeze()
+        prob = prob.to(torch.uint8).detach().cpu().numpy().squeeze().squeeze()
+        
+        if save_nifti == True:
+            volume_name = f"volume-{idx:04d}"
+            out_path_volume = f'{self.sample_nifti_dir}/{volume_name}.nii.gz'
+            out_path_prob = f'{self.sample_nifti_dir}/{volume_name}_MASK.nii.gz'
+            print(f"Saving Nifti to: {out_path_volume}")
+            nib.save(nib.Nifti1Image(im, affine=volume_affine), out_path_volume)
+            nib.save(nib.Nifti1Image(prob, affine=volume_affine), out_path_prob)
+        if save_fig == True:
+            make_fig = True
+        if make_fig == True:
+            self.make_fig(im, prob)
+        if save_fig == True:
+            plt.savefig(f"{self.sample_fig_dir}/{volume_name}.png")
+        return im, prob
+    
+
+    def make_fig(self, im:np.ndarray, prob:np.ndarray) -> None:
+        """
+        Make 2D figure (GT, prediction, gt-pred superimposed).
+        Print to console.
+
+        Parameters
+        ----------
+        im : arr[float]
+            Volume of x data
+        prob: arr[bool] 
+            Volume of y data
+        """
+        plt.figure()
+        f, axarr = plt.subplots(1, 3, figsize=(15, 15), constrained_layout=True)
+        axarr = axarr.flatten()
+        frame = np.random.randint(0, im.shape[0])
+        axarr[0].imshow(im[frame], cmap='gray')
+        axarr[1].imshow(prob[frame], cmap='gray')
+        axarr[2].imshow(im[frame], cmap='gray')
+        axarr[2].contour(prob[frame], cmap='magma', alpha=1)
 
 
 class RealOct(object):
@@ -28,13 +127,15 @@ class RealOct(object):
                  patch_size:int=256,
                  step_size:int=256,
                  binarize:bool=False,
+                 binary_threshold:int=0.5,
                  normalize:bool=False,
                  p_bounds:list[float]=[0, 1],
                  v_bounds:list[float]=[0.05, 0.95],
                  device:str='cuda',
-                 pad_:bool=True,
+                 pad_:bool=False,
                  padding_method:str='replicate',
-                 patch_coords_:bool=True
+                 patch_coords_:bool=False,
+                 trainee=None
                  ):
 
         """
@@ -65,23 +166,30 @@ class RealOct(object):
         ----------
         volume_nifti
             Nifti represnetation of volumetric data.
+
+        Notes
+        -----
+        1. Normalize
+        2. Binarize
+        3. Convert to dtype
         """
         self.volume=volume
-        self.volume_name=volume.split('/')[-1].strip('.nii')
-        self.volume_dir=volume.strip('.nii').strip(self.volume_name).strip('/')
         self.dtype=dtype
         self.patch_size=patch_size
         self.step_size=step_size
         self.binarize=binarize
+        self.binary_threshold=binary_threshold
         self.normalize=normalize
         self.p_bounds=p_bounds
         self.v_bounds=v_bounds
         self.device=device
         self.padding_method=padding_method
+        self.trainee = trainee
         with torch.no_grad():
             self.volprep()
-            self.reshape()
-            self.pad_volume()
+            if pad_ == True:
+                self.reshape()
+                self.pad_volume()
 
 
     def volprep(self):
@@ -89,25 +197,28 @@ class RealOct(object):
         Prepare volume.
         """
         if isinstance(self.volume, str):
+            self.volume_name=self.volume.split('/')[-1].strip('.nii')
+            self.volume_dir=self.volume.strip('.nii').strip(self.volume_name).strip('/')
             nifti=nib.load(self.volume)
-            tensor=torch.tensor(nifti.get_fdata())
-            #self.volume_name = self.volume.split['/']
+            tensor=torch.tensor(nifti.get_fdata()).to(self.device)
         elif isinstance(self.volume, torch.Tensor):
             tensor = self.volume
             nifti = None
+        # Normalize
+        if self.normalize == True:
+            tensor = tensor.unsqueeze(0)
+            tensor = cc.QuantileTransform(
+                pmin=self.p_bounds[0], pmax=self.p_bounds[1],
+                vmin=self.v_bounds[0], vmax=self.v_bounds[1],
+                clip=False
+                )(tensor)[0]
+        # Binarize
         if self.binarize == True:
-            tensor[tensor >= 1] = 1
-            tensor[tensor < 1] = 0
-        elif self.binarize == False:
-            if self.normalize == True:
-                tensor = tensor.unsqueeze(0)
-                tensor = cc.QuantileTransform(
-                    pmin=self.p_bounds[0], pmax=self.p_bounds[1],
-                    vmin=self.v_bounds[0], vmax=self.v_bounds[1],
-                    clip=False
-                    )(tensor)[0]
+            tensor[tensor > self.binary_threshold] = 1
+            tensor[tensor <= self.binary_threshold] = 0
+        
         tensor = tensor.to(self.device).to(self.dtype)
-        self.volume_tensor = tensor
+        self.volume_tensor = tensor.detach()
         self.volume_nifti = nifti
 
 
@@ -141,6 +252,33 @@ class RealOct(object):
             pad=padding,
             mode=self.padding_method
             ).squeeze()
+        
+    def predict(self):
+        self.reshape(4)
+        c, x, y, z = self.volume_tensor.shape
+        padding = [
+            self.patch_size - x,
+            0,
+            self.patch_size - y,
+            0,
+            self.patch_size - z,
+            0
+        ]
+
+        self.volume_tensor = torch.nn.functional.pad(
+            input=self.volume_tensor,
+            pad = padding,
+            mode='replicate'
+        )
+
+        prediction = self.trainee(self.volume_tensor.to('cuda').unsqueeze(0))
+        prediction = torch.sigmoid(prediction).squeeze().detach().to(self.device)
+        prediction = prediction[:x, :y, :z]
+        print(prediction.shape)
+        print(prediction.max())
+
+        #self.imprint_tensor = torch.zeros(self.volume_tensor.shape)
+
 
 
 class RealOctPatchLoader(RealOct, Dataset):
@@ -169,7 +307,7 @@ class RealOctPatchLoader(RealOct, Dataset):
         y_slice = slice(*working_patch_coords[1])
         z_slice = slice(*working_patch_coords[2])
         # Loading patch via coords and detaching from tracking
-        patch = self.volume_tensor[x_slice, y_slice, z_slice].detach().to(self.device)
+        patch = self.volume_tensor[x_slice, y_slice, z_slice]
         coords = [x_slice, y_slice, z_slice]
         return patch, coords
         
@@ -244,9 +382,10 @@ class RealOctPredict(RealOctPatchLoader, Dataset):
             Patch ID number to predict on. Updates self.imprint_tensor.
         """     
         patch, coords = super().__getitem__(idx)
-        prediction = self.trainee(patch.unsqueeze(0).unsqueeze(0))
-        prediction = torch.sigmoid(prediction).squeeze().detach()
-        self.imprint_tensor[coords[0], coords[1], coords[2]] += prediction
+        ## Needs to go on cuda for prediction
+        prediction = self.trainee(patch.to('cuda').unsqueeze(0).unsqueeze(0))
+        prediction = torch.sigmoid(prediction).squeeze().detach().to(self.device)
+        self.imprint_tensor[coords[0], coords[1], coords[2]] += prediction 
     
 
     def predict_on_all(self):
@@ -254,29 +393,53 @@ class RealOctPredict(RealOctPatchLoader, Dataset):
         Predict on all patches.
         """
         length = len(self)
+        t0 = time.time()
         for idx in range(len(self)):
             self.__getitem__(idx)
-            sys.stdout.write(f"\rPrediction {idx + 1}/{length}")
+            total_elapsed = time.time() - t0
+            average_time_per_pred = round(total_elapsed / (idx+1), 2)
+
+            sys.stdout.write(f"\rPrediction {idx + 1}/{length} | {average_time_per_pred} sec/pred | {round(average_time_per_pred * length / 60, 2)} min total pred time")
             sys.stdout.flush()
 
         # Step size, then number to divide by
         avg_factors = {256:1, 128:8, 64:64, 32:512, 16:4096}
+        print(f"\n\n{avg_factors[self.step_size]}x Averaging...")
         self.imprint_tensor = self.imprint_tensor / avg_factors[self.step_size]
+        s = slice(self.patch_size, -self.patch_size)
+        self.imprint_tensor = self.imprint_tensor[s, s, s]
     
 
     def save_prediction(self):
         """
         Save prediction volume.
         """
-        self.out_fname = Options(self).out_filepath()
-        print('\n', f"Saving prediction to {self.out_fname}")
+        self.out_dir, self.out_fname = Options(self).out_filepath()
+        os.makedirs(self.out_dir, exist_ok=True)
+
+        print(f"\nSaving prediction to {self.out_fname}...")
+        self.imprint_tensor = self.imprint_tensor.cpu().numpy()
+        print(self.imprint_tensor.shape)
+        print(self.imprint_tensor.max())
+
+        out_nifti = nib.nifti1.Nifti1Image(dataobj=self.imprint_tensor, affine=self.volume_nifti.affine)
+        nib.save(out_nifti, self.out_fname)
 
 if __name__ == "__main__":
-    small_vol = "/autofs/cluster/octdata2/users/epc28/veritas/data/caroline_data/I46_Somatosensory_20um_crop.nii"
-    big_vol = "/autofs/cluster/octdata2/users/epc28/veritas/data/I_mosaic_0_0_0.nii"
-    unet_params = "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_6/train_params.json"
-    checkpoint = "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_8/checkpoints/epoch=135-val_loss=0.00054.ckpt"
-    unet = UNet(train_params_json=unet_params, checkpoint=checkpoint)
-    vol = RealOctPredict(volume=small_vol, step_size=256, trainee=unet.trainee)
-    vol.predict_on_all()
-    vol.save_prediction()
+    #unet_params = "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_6/train_params.json"
+    #checkpoint = "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_8/checkpoints/epoch=135-val_loss=0.00054.ckpt"
+    unet = LoadUnet(version_n=8).trainee.trainee
+    vol = '/autofs/cluster/octdata2/users/epc28/veritas/data/UO1/64x64x64_sub-I38_ses-OCT_sample-BrocaAreaS01_OCT-volume.nii'
+    oct = RealOct(
+        vol,
+        device='cpu',
+        trainee=unet,
+        normalize=True)
+    print(oct.predict())
+
+    #small_vol = "/autofs/cluster/octdata2/users/epc28/veritas/data/caroline_data/I46_Somatosensory_20um_crop.nii"
+    #big_vol = "/autofs/cluster/octdata2/users/epc28/veritas/data/I_mosaic_0_0_0.nii"
+    
+    #vol = RealOctPredict(volume=small_vol, step_size=256, trainee=unet.trainee)
+    #vol.predict_on_all()
+    #vol.save_prediction()

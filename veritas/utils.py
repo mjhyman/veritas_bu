@@ -1,4 +1,5 @@
 __all__ = [
+    'Options',
     'Thresholding',
     'PathTools',
     'JsonTools'
@@ -26,19 +27,19 @@ class Options(object):
 
     def out_filepath(self):
         """
-        Determine out file name.
+        Determine out filename. Same dir as volume.
         """
-        stem = ''
-        stem += f"{self.attribute_dict['volume_name']}-prediction"
+        #stem = ''
+        stem = f"{self.attribute_dict['volume_name']}-prediction"
         stem += f"_stepsz-{self.attribute_dict['step_size']}"
         try:
             stem += f"_{self.attribute_dict['accuracy_name']}-{self.attribute_dict['accuracy_val']}"
         except:
             pass
         stem += '.nii'
-        full_path = f"{self.attribute_dict['volume_dir']}/predictions/{stem}"
-        return full_path
-
+        self.out_dir = f"/{self.attribute_dict['volume_dir']}/predictions"
+        self.full_path = f"{self.out_dir}/{stem}"
+        return self.out_dir, self.full_path
 
 
 

@@ -7,14 +7,14 @@ import sys
 import torch
 from torch import nn
 import math as pymath
-from torch.utils.data import Dataset
 
 # Custom packages
 sys.path.append('/autofs/cluster/octdata2/users/epc28/veritas')
 sys.path.append('/autofs/cluster/octdata2/users/epc28/veritas/cornucopia')
-from cornucopia import RandomSmoothLabelMap,\
-    RandomGammaNoiseTransform, RandomSlicewiseMulFieldTransform,\
-    random
+from cornucopia.cornucopia.labels import RandomSmoothLabelMap
+from cornucopia.cornucopia.noise import RandomGammaNoiseTransform
+from cornucopia.cornucopia.intensity import RandomSlicewiseMulFieldTransform
+from cornucopia.cornucopia.random import Uniform, Fixed, RandInt
 
 
 def parenchyma_(vessel_labels_tensor:torch.Tensor, nb_classes:int=4,
@@ -32,12 +32,12 @@ def parenchyma_(vessel_labels_tensor:torch.Tensor, nb_classes:int=4,
     # Create the label map of parenchyma but convert to float32 for further computations
     # Add 1 so that we can work with every single pixel (no zeros)
     parenchyma = RandomSmoothLabelMap(
-        nb_classes=random.Fixed(nb_classes),
+        nb_classes=Fixed(nb_classes),
         shape=shape
         )(vessel_labels_tensor).to(torch.float32) + 1
     # Applying speckle noise model
     parenchyma = RandomGammaNoiseTransform(
-        sigma=random.Uniform(0.2, 0.4)
+        sigma=Uniform(0.2, 0.4)
         )(parenchyma).to(torch.float32)[0]
     # Applying z-stitch artifact
     parenchyma = RandomSlicewiseMulFieldTransform()(parenchyma)
@@ -64,14 +64,14 @@ def vessels_(vessel_labels_tensor:torch.Tensor, n_groups:int=10,
     # Get sorted list of all vessel labels
     vessel_labels = list(sorted(vessel_labels_tensor.unique().tolist()))[1:]
     # Generate the number of unique intensities
-    nb_unique_intensities = random.RandInt(1, n_groups)()
+    nb_unique_intensities = RandInt(1, n_groups)()
     # Calculate the number of elements (vessels) in each intensity group
     nb_vessels_per_intensity = int(pymath.ceil(len(vessel_labels)
                                                / nb_unique_intensities))
     # Iterate through each vessel group based on their unique intensity
     for int_n in range(nb_unique_intensities):
         # Assign intensity for this group from uniform distro
-        intensity = random.Uniform(min_i, max_i)()
+        intensity = Uniform(min_i, max_i)()
         # Get label ID's of all vessels that will be assigned to this intensity
         vessel_labels_at_i = vessel_labels[int_n * nb_vessels_per_intensity:
                                            (int_n + 1) * nb_vessels_per_intensity]
@@ -81,7 +81,7 @@ def vessels_(vessel_labels_tensor:torch.Tensor, n_groups:int=10,
     return scaling_tensor
 
 
-class OCTSynthVesselImage(nn.Module):
+class OctVolSynth(nn.Module):
 
     def __init__(self):
         super().__init__()
