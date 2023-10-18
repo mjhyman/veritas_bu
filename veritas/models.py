@@ -2,7 +2,6 @@
 import sys
 import json
 import torch
-import numpy as np
 from torch import nn
 from glob import glob
 from torch.utils.data import DataLoader, random_split
@@ -11,10 +10,8 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 # Custom packages
-sys.path.append('/autofs/cluster/octdata2/users/epc28/veritas')
 from vesselseg.vesselseg import networks, losses, train
 from vesselseg.vesselseg.synth import SynthVesselDataset
-#from vesselseg import networks, losses, train
 
 kwargs_bb = {
     "nb_levels": 4,
@@ -88,27 +85,41 @@ class UnetBase(object):
             #    loss=self.losses).to(self.device)
             #self.trainee = self.trainee.eval()
 
+class UnetTrain(UnetBase):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.backbone_dict = {
+            'nb_levels': 4,
+            'nb_features': [32, 64, 128, 256],
+            'dropout': 0.05,
+            'nb_conv': 2,
+            'kernel_size': 3,
+            }
+        self.load_trainee()
+
 
     def train_it(self, data_path, train_to_val:float=0.8, batch_size:int=1):
-        dataset = SynthVesselDataset(data_path)
+        train_split = train_to_val
+        val_split = 1 - train_split
+        label_paths = glob(f'{data_path}/*label*')
+        dataset = SynthVesselDataset(label_paths, device=self.device)
         seed = torch.Generator().manual_seed(42)
-        train_set, val_set = random_split(dataset, [train_to_val, 1-train_to_val], seed)
+        train_set, val_set = random_split(dataset, [train_split, val_split], seed)
         train_loader = DataLoader(train_set, batch_size, shuffle=True)
         val_loader = DataLoader(val_set, batch_size, shuffle=False)
         logger = TensorBoardLogger(self.output_path, 'models', self.version_n)
-        checkpoint_callback = ModelCheckpoint(monitor="val_metric_dice", mode="min", every_n_epochs=1, save_last=True, filename='{epoch}-{val_loss:.5f}')
-        trainer = Trainer(accelerator='cuda', benchmark=True, devices=1, logger=logger, callbacks=[checkpoint_callback], max_epochs=1000)
+        checkpoint_callback = ModelCheckpoint(monitor="val_metric_dice", mode="min", every_n_epochs=5, save_last=True, filename='{epoch}-{val_loss:.5f}')
+        trainer = Trainer(
+            accelerator='cuda',
+            check_val_every_n_epoch=5,
+            accumulate_grad_batches=3,
+            profiler='simple', 
+            devices=1,
+            logger=logger,
+            callbacks=[checkpoint_callback],
+            max_epochs=1000)
         trainer.fit(self.trainee, train_loader, val_loader)
-
-    def prep_for_train(self):
-        self.backbone_dict = {
-            'nb_levels': None,
-            'nb_features': None,
-            'dropout': None,
-            'nb_conv': None,
-            'kernel_size': None,
-        }
-        self.load_trainee()
 
 
 class NewUnet(UnetBase):

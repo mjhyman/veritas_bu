@@ -13,8 +13,8 @@ import numpy as np
 import math as pymath
 from torchmetrics.functional import dice
 
-sys.path.append("/autofs/cluster/octdata2/users/epc28/veritas/cornucopia")
-import cornucopia as cc
+#sys.path.append("/autofs/cluster/octdata2/users/epc28/veritas/cornucopia")
+#import cornucopia as cc
 
 
 class Options(object):

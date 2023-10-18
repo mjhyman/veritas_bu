@@ -4,6 +4,7 @@ __all__ = [
     'RealOctPatchLoader',
     'RealOctPredict'
 ]
+# Standard imports
 import os
 import sys
 import time
@@ -14,15 +15,10 @@ import glob
 from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
 
-
-sys.path.append("/autofs/cluster/octdata2/users/epc28/veritas/cornucopia")
-import cornucopia as cc
-#import cornucopia.cornucopia as cc
-
-sys.path.append('/autofs/cluster/octdata2/users/epc28/veritas')
+# Custom imports
 from veritas.utils import PathTools
 from veritas.synth import OctVolSynth
-from veritas.models import UNet, LoadUnet
+from veritas.models import UNet
 from veritas.utils import Options
 
 
@@ -32,6 +28,7 @@ class ImageSynth(Dataset):
     """
     def __init__(self,
                  exp_path:str=None,
+                 label_type:str='label',
                  device:str="cuda"
                  ):
         """
@@ -41,7 +38,10 @@ class ImageSynth(Dataset):
             Path to synthetic experiment dir.
         """
         self.device = device
+        self.label_type = label_type
+        self.exp_path = exp_path
         self.label_paths = sorted(glob.glob(f"{exp_path}/*label*"))
+        self.y_paths = sorted(glob.glob(f"{self.exp_path}/*{self.label_type}*"))
         self.sample_fig_dir = f"{exp_path}/sample_vols/figures"
         self.sample_nifti_dir = f"{exp_path}/sample_vols/niftis"
         PathTools(self.sample_nifti_dir).makeDir()
@@ -77,7 +77,14 @@ class ImageSynth(Dataset):
         im, prob = OctVolSynth()(volume_tensor)
         # Converting image and prob map to numpy. Reshaping
         im = im.detach().cpu().numpy().squeeze().squeeze()
-        prob = prob.to(torch.uint8).detach().cpu().numpy().squeeze().squeeze()
+        if self.label_type == 'label':
+            prob = prob.to(torch.uint8).detach().cpu().numpy().squeeze().squeeze()
+        elif self.label_type != 'label':
+            prob = nib.load(self.y_paths[idx]).get_fdata()
+            prob[prob > 0] = 1
+            prob[prob < 0] = 0
+        else:
+            pass
         
         if save_nifti == True:
             volume_name = f"volume-{idx:04d}"

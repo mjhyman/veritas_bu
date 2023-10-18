@@ -8,9 +8,6 @@ import torch
 from torch import nn
 import math as pymath
 
-# Custom packages
-sys.path.append('/autofs/cluster/octdata2/users/epc28/veritas')
-sys.path.append('/autofs/cluster/octdata2/users/epc28/veritas/cornucopia')
 from cornucopia.cornucopia.labels import RandomSmoothLabelMap
 from cornucopia.cornucopia.noise import RandomGammaNoiseTransform
 from cornucopia.cornucopia.intensity import RandomSlicewiseMulFieldTransform
