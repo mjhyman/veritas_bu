@@ -15,7 +15,7 @@ import nibabel as nib
 # Custom Imports
 from veritas.utils import PathTools
 from vesselsynth.vesselsynth import backend
-from vesselsynth.vesselsynth.save_exp import SaveExp
+from vesselsynth.vesselsynth import SaveExp
 from vesselsynth.vesselsynth.io import default_affine
 from vesselsynth.vesselsynth.synth import SynthVesselOCT
 from cornucopia.cornucopia.labels import RandomSmoothLabelMap

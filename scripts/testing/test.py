@@ -1,19 +1,14 @@
-import sys
 import time
-from veritas.models import Unet
-from veritas.data import RealOctPredict
-
-import torch.multiprocessing as mp
+import veritas
 import torch
 
 if __name__ == "__main__":
     print(f"CUDA available: {torch.cuda.is_available()}")
     t1 = time.time()
-    #volume = '/autofs/cluster/octdata2/users/epc28/veritas/data/caroline_data/I46_Somatosensory_20um_crop.nii'
-    volume = '/autofs/cluster/octdata2/users/epc28/veritas/data/UO1/unet-validation-volumes/I48/I48_vol-2.nii'
-    unet = Unet(version_n=8)
+    volume = '/autofs/cluster/octdata2/users/epc28/veritas/data/caroline_data/I46_Somatosensory_20um_crop.nii'
+    unet = veritas.Unet(version_n=8)
     unet.load()
-    prediction = RealOctPredict(
+    prediction = veritas.RealOctPredict(
         volume=volume,
         trainee=unet.trainee,
         patch_size=256,
