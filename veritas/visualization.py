@@ -1,12 +1,12 @@
-import cv2
-import sys
+__all__ = [
+    'Visualize',
+    'Confusion'
+]
+# Standard Imports
 import torch
 import numpy as np
-import nibabel as nib
 import tifffile
-from PIL import Image
-
-sys.path.append('/autofs/cluster/octdata2/users/epc28/veritas')
+# Custom Imports
 from veritas.data import RealOct
 
 class Visualize(object):
@@ -16,7 +16,7 @@ class Visualize(object):
     def __init__(self, in_path, out_path=None, out_name='movie'):
         self.in_path = in_path
         if out_path is None:
-            self.out_path = f"/{'/'.join(self.in_path.split('/')[:-1])}/{out_name}.tiff"
+            self.out_path = f"{'/'.join(self.in_path.split('/')[:-1])}/{out_name}.tiff"
         else:
             self.out_path = out_path
         self.vol = self.load_base_vol()
@@ -77,6 +77,7 @@ class Visualize(object):
         self.vol[self.vol > 255] = 255
         from scipy import ndimage
         self.vol = ndimage.zoom(self.vol, [1, 12, 12, 1], order=0)
+        print(f'Saving to: {self.out_path}...')
         tifffile.imwrite(self.out_path, self.vol)
 
 
@@ -136,18 +137,21 @@ class Confusion(object):
         rgb = [0, 255, 0]
         return out_vol, rgb
     
-    
-    
+
+vol_path = '/autofs/cluster/octdata2/users/epc28/veritas/data/UO1/unet-validation-volumes/I48/I48_vol-2.nii'
+out_name = vol_path.split('/')[-1].strip('.nii')
+out_path = None #"/autofs/cluster/octdata2/users/epc28/veritas/data/UO1/unet-validation-volumes/I38/I38_vol-1.tiff"
+
 # true positive = yellow, false positive = red, false negative = green
-vis = Visualize(vol_path, out_path="/autofs/cluster/octdata2/users/epc28/veritas/data/UO1/tiffs/tp+fp+fn.tiff")
-confusion = Confusion(ground_truth, prediction)
+vis = Visualize(vol_path, out_name=out_name)
+#confusion = Confusion(ground_truth, prediction)
 
-tp, tp_rgb = confusion.true_positives()
-vis.overlay(tp, name='true_positives', rgb=tp_rgb)
+#tp, tp_rgb = confusion.true_positives()
+#vis.overlay(tp, name='true_positives', rgb=tp_rgb)
 
-fp, fp_rgb = confusion.false_positives()
-vis.overlay(fp, name='false_positives', rgb=fp_rgb)
+#fp, fp_rgb = confusion.false_positives()
+#vis.overlay(fp, name='false_positives', rgb=fp_rgb)
 
-fn, fn_rgb = confusion.false_negatives()
-vis.overlay(fn, name='false_negatives', rgb=fn_rgb)
+#fn, fn_rgb = confusion.false_negatives()
+#vis.overlay(fn, name='false_negatives', rgb=fn_rgb)
 vis.make_tiff()

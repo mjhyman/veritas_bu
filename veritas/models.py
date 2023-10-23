@@ -1,45 +1,35 @@
-# Standard imports
-import sys
-import json
+__all__ = [
+    'Unet'
+]
+# Standard Imports
 import torch
-from torch import nn
 from glob import glob
-from torch.utils.data import DataLoader, random_split
+import torch.multiprocessing as mp
 from pytorch_lightning import Trainer
+from torch.utils.data import DataLoader, random_split
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
-
-# Custom packages
+# Custom Imports
 from vesselseg.vesselseg import networks, losses, train
 from vesselseg.vesselseg.synth import SynthVesselDataset
+from veritas.utils import PathTools, JsonTools, Checkpoint
+# Eti's superstition
+torch.no_grad()
 
-kwargs_bb = {
-    "nb_levels": 4,
-    "nb_features": [
-        32,
-        64,
-        128,
-        256
-    ],
-    "dropout": 0,
-    "nb_conv": 2,
-    "kernel_size": 3,
-    "activation": "ReLU",
-    "norm": "instance"
-}
-
-class UnetBase(object):
+class Unet(object):
     """
     Base class for UNet.
     """
-    def __init__(self, version_n:int, augmentation=None, device='cuda'):
+    def __init__(
+            self, version_n:int, device='cuda'
+        ):
         """
         Parameters
         ----------
         version_n : int
             Version of model.
-        augmentation : nn.Module
-            Volume synthesis/augmentation class.
+        device : {'cuda', 'cpu'}
+            Device to load UNet onto.
         """
         self.version_n=version_n
         self.output_path="/autofs/cluster/octdata2/users/epc28/veritas/output"
@@ -47,161 +37,175 @@ class UnetBase(object):
         self.json_path=f"{self.version_path}/json_params.json"
         self.checkpoint_dir = f"{self.version_path}/checkpoints"
         self.device=device
-        self.backbone_dict = {}
         self.losses={0: losses.DiceLoss(labels=[1], activation='Sigmoid')}
-        self.metrics=nn.ModuleDict({'dice': self.losses[0]})
-        self.augmentation = augmentation
+        self.metrics = torch.nn.ModuleDict({'dice': self.losses[0]})
 
 
-    def load_trainee(self, fine_tuned_trainee:bool=False):
-        """
-        Load trainee with new backbone.
+    def load(self, backbone_dict=None):
+        if backbone_dict is None:
+            print(f'Loading backbone params from json...')
+            self.backbone_dict = JsonTools(self.json_path).read()
+        else:
+            self.backbone_dict=backbone_dict
 
-        Parameters
-        ----------
-        fine_tuned_trainee : bool
-            Make the trainee a fine tuned trainee.
-        """
         self.segnet = networks.SegNet(
-            ndim=3,
-            in_channels=1,
-            out_channels=1,
-            kernel_size=3,
-            backbone='UNet',
-            activation=None, 
+            3, 1, 1, 3, activation=None, backbone='UNet',
             kwargs_backbone=self.backbone_dict
             )
-        self.trainee = train.SupervisedTrainee(
-            self.segnet,
+        
+        trainee = train.SupervisedTrainee(
+            network=self.segnet,
             loss=self.losses[0],
             metrics=self.metrics,
-            augmentation=self.augmentation
+            #augmentation=self.augmentation
+            )
+
+        if backbone_dict is None:
+            print("Loading checkpoint...")
+            trainee = train.FineTunedTrainee.load_from_checkpoint(
+                checkpoint_path=Checkpoint(self.checkpoint_dir).last(),
+                trainee=trainee,
+                loss=self.losses
+                )
+            trainee.to(self.device)
+            print('Checkpoint loaded')
+        else:
+            trainee = train.FineTunedTrainee(
+                trainee=trainee,
+                loss=self.losses
             ).to(self.device)
-        if fine_tuned_trainee == True:
-            pass
-            #self.trainee = train.FineTunedTrainee.load_from_checkpoint(
-            #    checkpoint_path="/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_8/checkpoints/epoch=135-val_loss=0.00054.ckpt",
-            #    trainee=self.trainee,
-            #    loss=self.losses).to(self.device)
-            #self.trainee = self.trainee.eval()
+        self.trainee = trainee
+        return trainee
 
-class UnetTrain(UnetBase):
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.backbone_dict = {
-            'nb_levels': 4,
-            'nb_features': [32, 64, 128, 256],
-            'dropout': 0.05,
-            'nb_conv': 2,
-            'kernel_size': 3,
+    def new(self, nb_levels=4, nb_features=[32,64,128,256], dropout=0, nb_conv=2,
+            kernel_size=3, activation='ReLU', norm='instance'):
+        """
+        nb_levels : int
+            Number of convolutional levels for Unet.
+        nb_features : list[int]
+            Features per layer. len(list) must equal nb_levels.
+        dropout : float
+            Percent of data to be dropped randomly.
+        nb_conv : int
+            Number of convolutions per layer.
+        kernel_size : int
+            Size of convolutional window.
+        activation : str
+            Activation to be used for all filters.
+        norm : str
+            How to normalize layers.
+        """
+        backbone_dict = {
+            "nb_levels": nb_levels,
+            "nb_features": nb_features,
+            "dropout": dropout,
+            "nb_conv": nb_conv,
+            "kernel_size": kernel_size,
+            "activation": activation,
+            "norm": norm
             }
-        self.load_trainee()
+        PathTools(self.version_path).makeDir()
+        JsonTools(self.json_path).log(backbone_dict)  
+        self.trainee = self.load(backbone_dict)
+    
 
+    def train_it(self, data_path, augmentation=None, train_to_val:float=0.8, batch_size:int=1,
+                 epochs=1000, loader_device='cuda', check_val_every_n_epoch:int=5,
+                 accumulate_gradient_n_batches:int=5):
+        """
+        Train unet after defining or loading model.
+        
+        Parameters
+        ----------
+        data_path : str
+            Path to synthetic volumetric data.
+        augmentation : nn.Module
+            Volume synthesis/augmentation class.
+        train_to_val : float
+            Ratio of training data to validation data for training loop.
+        batch_size : int
+            Number of volumes per batch (before optimizer is stepped)
+        epochs : int
+            Number of epochs in entire trainig loop.
+        loader_device : {'cuda', 'cpu'}
+            Device that will be used by dataloaders.
+        check_val_every_n_epoch : int
+            Number of times validation dice score is calculated as expressed in epochs.
+        accumulate_gradient_n_batches : int
+            Number of batches to compute before stepping optimizer.
+        """
+        self.epochs = epochs
+        self.augmentation = augmentation
+        self.check_val_every_n_epoch = check_val_every_n_epoch
+        self.accumulate_gradient_n_batches = accumulate_gradient_n_batches
+        self.gpus=int(torch.cuda.device_count())
 
-    def train_it(self, data_path, train_to_val:float=0.8, batch_size:int=1):
         train_split = train_to_val
         val_split = 1 - train_split
-        label_paths = glob(f'{data_path}/*label*')
-        dataset = SynthVesselDataset(label_paths, device=self.device)
         seed = torch.Generator().manual_seed(42)
+        label_paths = glob(f'{data_path}/*label*')
+        dataset = SynthVesselDataset(label_paths, device=loader_device, transform=self.augmentation)
         train_set, val_set = random_split(dataset, [train_split, val_split], seed)
-        train_loader = DataLoader(train_set, batch_size, shuffle=True)
-        val_loader = DataLoader(val_set, batch_size, shuffle=False)
-        logger = TensorBoardLogger(self.output_path, 'models', self.version_n)
-        checkpoint_callback = ModelCheckpoint(monitor="val_metric_dice", mode="min", every_n_epochs=5, save_last=True, filename='{epoch}-{val_loss:.5f}')
-        trainer = Trainer(
-            accelerator='cuda',
-            check_val_every_n_epoch=5,
-            accumulate_grad_batches=3,
-            profiler='simple', 
-            devices=1,
-            logger=logger,
-            callbacks=[checkpoint_callback],
-            max_epochs=1000)
-        trainer.fit(self.trainee, train_loader, val_loader)
 
-
-class NewUnet(UnetBase):
-    """
-    Load a Unet from a checkpoint.
-    """
-    def __init__(
-            self,
-            shape:int=256,
-            nb_levels:int=4,
-            nb_features:list=[32, 64, 128, 256],
-            dropout:int=0,
-            nb_conv:int=2,
-            kernel_size:int=3,
-            train_batch_size:int=2,
-            val_batch_size:int=1,
-            epochs:int=1000,
-            switch_to_dice_epoch:int=25,
-            *args,
-            **kwargs
-            ):
-        """
-        Parameters
-        ----------
-        shape
-        nb_levels
-        features
-        train_batch_size
-        """
-        super().__init__(*args, **kwargs)
-        self.shape=shape
-        self.backbone_dict['nb_levels']=nb_levels
-        self.backbone_dict['nb_features']=nb_features
-        self.backbone_dict['dropout']=dropout
-        self.backbone_dict['nb_conv']=nb_conv
-        self.backbone_dict['kernel_size']=kernel_size
-        self.train_batch_size=train_batch_size
-        self.val_batch_size=val_batch_size
-        self.epochs=epochs
-        self.switch_to_dice_epoch=switch_to_dice_epoch
-        self.load_trainee()
-
-        
-class UNet(object):
-    """
-    UNet
-    """
-    def __init__(self,
-                 train_params_json:str,
-                 checkpoint:str,
-                 device:{'cpu', 'cuda'}='cuda',
-                 ):
-        """
-        Parameters
-        ----------
-        train_params_json : str
-            Path to json containing the parameters that were used for training.
-        checkpoint : str
-            Path to checkpoint of model weights.
-        device : {'cpu', 'cuda'}
-            Select device to load and handle data. 
-        """
-        self.train_params_json=train_params_json
-        self.device=device
-        self.checkpoint = checkpoint
-        self.model_params = json.load(open(self.train_params_json))
-        # U-Net paths
-        self.model = networks.SegNet(3, 1, 1, activation=None,
-            backbone="UNet",
-            kwargs_backbone=(self.model_params['model_architecture'])
+        # Instance variables start
+        self.train_loader = DataLoader(train_set, batch_size, shuffle=True)
+        self.val_loader = DataLoader(val_set, 1, shuffle=False)
+        self.logger = TensorBoardLogger(self.output_path, 'models', self.version_n)
+        self.checkpoint_callback = ModelCheckpoint(
+            monitor="val_metric_dice", mode="min", every_n_epochs=5,
+            save_last=True, filename='{epoch}-{val_loss:.5f}'
             )
-        self.losses = {0: losses.DiceLoss(labels=[1],
-            activation='Sigmoid')}
-        self.metrics = nn.ModuleDict({'dice': self.losses[0]})
-        self.trainee = train.SupervisedTrainee(
-            self.model,
-            loss=self.losses,
-            metrics=self.metrics)
-        self.trainee = train.FineTunedTrainee.load_from_checkpoint(
-            checkpoint_path=self.checkpoint,
-            trainee=self.trainee,
-            loss=self.losses)
-        trainee = self.trainee.trainee
-        trainee = trainee.to(self.device)
-        trainee = trainee.eval()
+        # Instance variables stop
+
+        if self.gpus == 1:
+            self.sequential_train()
+        elif self.gpus >= 2:
+            self.distributed_train()
+
+    def sequential_train(self):
+        """
+        Train on single GPU.
+        """
+        print('Training on 1 gpu.')
+        trainer_ = Trainer(
+            accelerator=self.device,
+            check_val_every_n_epoch=self.check_val_every_n_epoch,
+            accumulate_grad_batches=self.accumulate_gradient_n_batches,
+            devices=1,
+            logger=self.logger,
+            callbacks=[self.checkpoint_callback],
+            max_epochs=self.epochs
+            )
+        trainer_.fit(self.trainee, self.train_loader, self.val_loader)
+
+    def distributed_train(self):
+        """
+        Train on multiple GPU devices.
+        """
+        print(f"Training on {self.gpus} gpus in cluster.")
+        trainer_ = Trainer(
+            accelerator=self.device,
+            accumulate_grad_batches=self.accumulate_gradient_n_batches,
+            check_val_every_n_epoch=self.check_val_every_n_epoch,
+            devices=self.gpus,
+            strategy='ddp',
+            num_nodes=1,
+            callbacks=[self.checkpoint_callback],
+            logger=self.logger,
+            max_epochs=self.epochs
+        )
+        mp.set_start_method('spawn', force=True)
+        n_processes = self.gpus
+        self.segnet.share_memory()
+        processes = []
+        for rank in range(n_processes):
+            process = mp.Process(target=trainer_.fit(
+                self.trainee,
+                self.train_loader,
+                self.val_loader),
+                args=(self.segnet,))
+            process.start()
+            processes.append(process)
+        for proc in processes:
+            proc.join()

@@ -11,117 +11,10 @@ import time
 import torch
 import numpy as np
 import nibabel as nib
-import glob
 from torch.utils.data import Dataset
-import matplotlib.pyplot as plt
-
 # Custom imports
-from veritas.utils import PathTools
-from veritas.synth import OctVolSynth
-from veritas.models import UNet
 from veritas.utils import Options
-
-
-class ImageSynth(Dataset):
-    """
-    Synthesize 3D volume from vascular network.
-    """
-    def __init__(self,
-                 exp_path:str=None,
-                 label_type:str='label',
-                 device:str="cuda"
-                 ):
-        """
-        Parameters
-        ----------
-        exp_path : str
-            Path to synthetic experiment dir.
-        """
-        self.device = device
-        self.label_type = label_type
-        self.exp_path = exp_path
-        self.label_paths = sorted(glob.glob(f"{exp_path}/*label*"))
-        self.y_paths = sorted(glob.glob(f"{self.exp_path}/*{self.label_type}*"))
-        self.sample_fig_dir = f"{exp_path}/sample_vols/figures"
-        self.sample_nifti_dir = f"{exp_path}/sample_vols/niftis"
-        PathTools(self.sample_nifti_dir).makeDir()
-        PathTools(self.sample_fig_dir).makeDir()
-
-
-    def __len__(self) -> int:
-        return len(self.label_paths)
-
-
-    def __getitem__(self, idx:int, save_nifti=False, make_fig=False,
-                    save_fig=False) -> tuple:
-        """
-        Parameters
-        ----------
-        idx : int
-            Volume ID number.
-        save_nifti : bool
-            Save volume as nifti to sample dir.
-        make_fig : bool
-            Make figure and print it to ipynb output.
-        save_fig : bool
-            Generate and save figure to sample dir.
-        """
-        # Loading nifti and affine
-        nifti = nib.load(self.label_paths[idx])
-        volume_affine = nifti.affine
-        # Loading and processing volume tensor
-        volume_tensor = torch.from_numpy(nifti.get_fdata()).to(self.device)
-        # Reshaping
-        volume_tensor = volume_tensor.squeeze()[None, None]
-        # Synthesizing volume
-        im, prob = OctVolSynth()(volume_tensor)
-        # Converting image and prob map to numpy. Reshaping
-        im = im.detach().cpu().numpy().squeeze().squeeze()
-        if self.label_type == 'label':
-            prob = prob.to(torch.uint8).detach().cpu().numpy().squeeze().squeeze()
-        elif self.label_type != 'label':
-            prob = nib.load(self.y_paths[idx]).get_fdata()
-            prob[prob > 0] = 1
-            prob[prob < 0] = 0
-        else:
-            pass
-        
-        if save_nifti == True:
-            volume_name = f"volume-{idx:04d}"
-            out_path_volume = f'{self.sample_nifti_dir}/{volume_name}.nii.gz'
-            out_path_prob = f'{self.sample_nifti_dir}/{volume_name}_MASK.nii.gz'
-            print(f"Saving Nifti to: {out_path_volume}")
-            nib.save(nib.Nifti1Image(im, affine=volume_affine), out_path_volume)
-            nib.save(nib.Nifti1Image(prob, affine=volume_affine), out_path_prob)
-        if save_fig == True:
-            make_fig = True
-        if make_fig == True:
-            self.make_fig(im, prob)
-        if save_fig == True:
-            plt.savefig(f"{self.sample_fig_dir}/{volume_name}.png")
-        return im, prob
-    
-
-    def make_fig(self, im:np.ndarray, prob:np.ndarray) -> None:
-        """
-        Make 2D figure (GT, prediction, gt-pred superimposed).
-        Print to console.
-
-        Parameters
-        ----------
-        im : arr[float]
-            Volume of x data
-        prob: arr[bool] 
-            Volume of y data
-        """
-        plt.figure()
-        f, axarr = plt.subplots(1, 3, figsize=(15, 15), constrained_layout=True)
-        axarr = axarr.flatten()
-        frame = np.random.randint(0, im.shape[0])
-        axarr[0].imshow(im[frame], cmap='gray')
-        axarr[1].imshow(prob[frame], cmap='gray')
-        axarr[2].imshow(im[frame], cmap='gray')
-        axarr[2].contour(prob[frame], cmap='magma', alpha=1)
+from cornucopia.cornucopia import QuantileTransform
 
 
 class RealOct(object):
@@ -214,7 +107,7 @@ class RealOct(object):
         # Normalize
         if self.normalize == True:
             tensor = tensor.unsqueeze(0)
-            tensor = cc.QuantileTransform(
+            tensor = QuantileTransform(
                 pmin=self.p_bounds[0], pmax=self.p_bounds[1],
                 vmin=self.v_bounds[0], vmax=self.v_bounds[1],
                 clip=False
@@ -405,14 +298,16 @@ class RealOctPredict(RealOctPatchLoader, Dataset):
             self.__getitem__(idx)
             total_elapsed = time.time() - t0
             average_time_per_pred = round(total_elapsed / (idx+1), 2)
-
             sys.stdout.write(f"\rPrediction {idx + 1}/{length} | {average_time_per_pred} sec/pred | {round(average_time_per_pred * length / 60, 2)} min total pred time")
             sys.stdout.flush()
 
         # Step size, then number to divide by
-        avg_factors = {256:1, 128:8, 64:64, 32:512, 16:4096}
-        print(f"\n\n{avg_factors[self.step_size]}x Averaging...")
-        self.imprint_tensor = self.imprint_tensor / avg_factors[self.step_size]
+        #avg_factors = {256:1, 128:8, 64:64, 32:512, 16:4096}
+        patchsize_to_stepsize = self.patch_size // self.step_size
+        # for patchsze=256: avg_factor(stepsize=[256,128,64,32]) = [1,8,64,512]
+        avg_factor = 8 ** (patchsize_to_stepsize - 1)
+        print(f"\n\n{avg_factor}x Averaging...")
+        self.imprint_tensor = self.imprint_tensor / avg_factor
         s = slice(self.patch_size, -self.patch_size)
         self.imprint_tensor = self.imprint_tensor[s, s, s]
     
@@ -431,22 +326,3 @@ class RealOctPredict(RealOctPatchLoader, Dataset):
 
         out_nifti = nib.nifti1.Nifti1Image(dataobj=self.imprint_tensor, affine=self.volume_nifti.affine)
         nib.save(out_nifti, self.out_fname)
-
-if __name__ == "__main__":
-    #unet_params = "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_6/train_params.json"
-    #checkpoint = "/autofs/cluster/octdata2/users/epc28/veritas/output/models/version_8/checkpoints/epoch=135-val_loss=0.00054.ckpt"
-    unet = LoadUnet(version_n=8).trainee.trainee
-    vol = '/autofs/cluster/octdata2/users/epc28/veritas/data/UO1/64x64x64_sub-I38_ses-OCT_sample-BrocaAreaS01_OCT-volume.nii'
-    oct = RealOct(
-        vol,
-        device='cpu',
-        trainee=unet,
-        normalize=True)
-    print(oct.predict())
-
-    #small_vol = "/autofs/cluster/octdata2/users/epc28/veritas/data/caroline_data/I46_Somatosensory_20um_crop.nii"
-    #big_vol = "/autofs/cluster/octdata2/users/epc28/veritas/data/I_mosaic_0_0_0.nii"
-    
-    #vol = RealOctPredict(volume=small_vol, step_size=256, trainee=unet.trainee)
-    #vol.predict_on_all()
-    #vol.save_prediction()

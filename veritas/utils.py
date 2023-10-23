@@ -2,20 +2,18 @@ __all__ = [
     'Options',
     'Thresholding',
     'PathTools',
-    'JsonTools'
+    'JsonTools',
+    'Checkpoint'
 ]
+# Standard Imports
 import os
-import sys
+import glob
 import json
 import torch
 import shutil
 import numpy as np
 import math as pymath
 from torchmetrics.functional import dice
-
-#sys.path.append("/autofs/cluster/octdata2/users/epc28/veritas/cornucopia")
-#import cornucopia as cc
-
 
 class Options(object):
     """
@@ -301,15 +299,16 @@ class JsonTools(object):
     """
     Class for handling json files.
     """
-    def __init__(self):
+    def __init__(self, path):
         """
         Parameters
         ----------
         path : str
             Path to json file.
         """
+        self.path = path
     
-    def log(self, dict, path):
+    def log(self, dict):
         """
         Save Python dictionary as json file.
 
@@ -321,6 +320,32 @@ class JsonTools(object):
             Path to new json file to create.
         """
         self.json_object = json.dumps(dict, indent=4)
-        file = open(path, 'x+')
+        file = open(self.path, 'x+')
         file.write(self.json_object)
         file.close()
+
+    def read(self):
+        f = open(self.path)
+        dic = json.load(f)
+        return dic
+    
+
+class Checkpoint(object):
+    """
+    Checkpoint handler.
+    """
+    def __init__(self, checkpoint_dir):
+        """
+        Parameters
+        ----------
+        checkpoint_dir : str
+            Directory that holds checkpoints.
+        """
+        self.checkpoint_dir = checkpoint_dir
+        self.checkpoint_paths = glob.glob(f"{self.checkpoint_dir}/*")
+
+    def best(self):
+        return [hit for hit in self.checkpoint_paths if 'epoch' in hit][0]
+    
+    def last(self):
+        return [hit for hit in self.checkpoint_paths if 'last' in hit][0]
