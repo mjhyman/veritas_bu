@@ -1,0 +1,3 @@
+cd '/autofs/cluster/octdata2/users/epc28/veritas';
+export PYTHONPATH='/autofs/cluster/octdata2/users/epc28/veritas';
+conda activate /autofs/cluster/octdata2/users/epc28/miniconda/envs/vesselsynth;
