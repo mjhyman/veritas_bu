@@ -4,4 +4,4 @@ import torch
 torch.no_grad()
 
 if __name__ == "__main__":
-    VesselSynth().synth()
+    VesselSynth(experiment_number=1).synth()

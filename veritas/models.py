@@ -32,7 +32,7 @@ class Unet(object):
             Device to load UNet onto.
         """
         self.version_n=version_n
-        self.output_path="/autofs/cluster/octdata2/users/epc28/veritas/output"
+        self.output_path="output"
         self.version_path=f"{self.output_path}/models/version_{version_n}"
         self.json_path=f"{self.version_path}/json_params.json"
         self.checkpoint_dir = f"{self.version_path}/checkpoints"
@@ -110,7 +110,7 @@ class Unet(object):
         self.trainee = self.load(backbone_dict)
     
 
-    def train_it(self, data_path, augmentation=None, train_to_val:float=0.8, batch_size:int=1,
+    def train_it(self, data_experiment_number, augmentation=None, train_to_val:float=0.8, batch_size:int=1,
                  epochs=1000, loader_device='cuda', check_val_every_n_epoch:int=5,
                  accumulate_gradient_n_batches:int=5):
         """
@@ -144,7 +144,7 @@ class Unet(object):
         train_split = train_to_val
         val_split = 1 - train_split
         seed = torch.Generator().manual_seed(42)
-        label_paths = glob(f'{data_path}/*label*')
+        label_paths = glob(f'output/synthetic_data/exp{data_experiment_number:04d}/*label*')
         dataset = SynthVesselDataset(label_paths, device=loader_device, transform=self.augmentation)
         train_set, val_set = random_split(dataset, [train_split, val_split], seed)
 

@@ -1,5 +1,4 @@
 {
-"output_path": "/autofs/cluster/octdata2/users/epc28/veritas/output/synthetic_data/exp0009",
 "n_volumes": 20,
 "shape": 128,
 "voxel_size": 0.01,

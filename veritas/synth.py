@@ -36,8 +36,8 @@ class VesselSynth(object):
     Synthesize 3D vascular network and save as nifti.
     """
     def __init__(self, device:str='cuda',
-                 json_param_path:str='scripts/vesselsynth/vesselsynth_params.json'
-                 ):
+                 json_param_path:str='scripts/vesselsynth/vesselsynth_params.json',
+                 experiment_number=9):
         """
         Parameters
         ----------
@@ -55,10 +55,10 @@ class VesselSynth(object):
         self.json_params = json.load(open(json_param_path))   # This is the json file that should be one directory above this one. Defines all variables
         self.shape = self.json_params['shape']                           
         self.n_volumes = self.json_params['n_volumes']
-        self.root = self.json_params['output_path']
-        PathTools(self.root).makeDir()
+        self.experiment_path = f"output/synthetic_data/exp{experiment_number:04d}"
+        PathTools(self.experiment_path).makeDir()
         self.header = nib.Nifti1Header()
-        self.prepOutput(f'{self.root}/vesselsynth_params.json')
+        self.prepOutput(f'{self.experiment_path}/vesselsynth_params.json')
         self.backend()
         self.outputShape()
 
@@ -112,7 +112,7 @@ class VesselSynth(object):
         affine = default_affine(volume.shape[-3:])
         nib.save(nib.Nifti1Image(
             volume.squeeze().cpu().numpy(), affine, self.header),
-            f'{self.root}/{volume_n:04d}_vessels_{volume_name}.nii.gz')
+            f'{self.experiment_path}/{volume_n:04d}_vessels_{volume_name}.nii.gz')
         
         
     def prepOutput(self, abspath:str):
