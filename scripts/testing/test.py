@@ -6,13 +6,13 @@ if __name__ == "__main__":
     print(f"CUDA available: {torch.cuda.is_available()}")
     t1 = time.time()
     volume = '/autofs/cluster/octdata2/users/epc28/veritas/data/caroline_data/I46_Somatosensory_20um_crop.nii'
-    unet = veritas.Unet(version_n=8)
+    unet = veritas.Unet(version_n=1)
     unet.load()
     prediction = veritas.RealOctPredict(
         volume=volume,
         trainee=unet.trainee,
-        patch_size=256,
-        step_size=64,
+        patch_size=128,
+        step_size=32,
         device='cuda',
         pad_=True,
         normalize=True

@@ -305,7 +305,14 @@ class RealOctPredict(RealOctPatchLoader, Dataset):
         #avg_factors = {256:1, 128:8, 64:64, 32:512, 16:4096}
         patchsize_to_stepsize = self.patch_size // self.step_size
         # for patchsze=256: avg_factor(stepsize=[256,128,64,32]) = [1,8,64,512]
-        avg_factor = 8 ** (patchsize_to_stepsize - 1)
+        if self.patch_size == 256:
+            avg_factor = 8 ** (patchsize_to_stepsize - 1)
+        elif self.patch_size == 128:
+            avg_factor = 4 ** (patchsize_to_stepsize - 1)
+        elif self.patch_size == 64:
+            avg_factor = 2 ** (patchsize_to_stepsize - 1)
+        else:
+            avg_factor =1
         print(f"\n\n{avg_factor}x Averaging...")
         self.imprint_tensor = self.imprint_tensor / avg_factor
         s = slice(self.patch_size, -self.patch_size)

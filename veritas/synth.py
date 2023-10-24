@@ -50,9 +50,9 @@ class VesselSynth(object):
         # All JIT things need to be handled here. Do not put them outside this class.
         os.environ['PYTORCH_JIT_USE_NNC_NOT_NVFUSER'] = '1'
         os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-        import interpol
-        interpol.backend.jitfields=True
-        #backend.jitfields = True
+        #import interpol
+        #interpol.backend.jitfields=True
+        backend.jitfields = True
 
         self.device = device
         self.json_params = json.load(open(json_param_path))   # This is the json file that should be one directory above this one. Defines all variables
