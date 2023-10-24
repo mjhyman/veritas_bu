@@ -14,13 +14,13 @@ import nibabel as nib
 
 # Custom Imports
 from veritas.utils import PathTools
-from vesselsynth.vesselsynth import backend
+from vesselsynth.vesselsynth.utils import backend
 from vesselsynth.vesselsynth import SaveExp
 from vesselsynth.vesselsynth.io import default_affine
 from vesselsynth.vesselsynth.synth import SynthVesselOCT
 from cornucopia.cornucopia.labels import RandomSmoothLabelMap
 from cornucopia.cornucopia.noise import RandomGammaNoiseTransform
-from cornucopia.cornucopia import RandomSlicewiseMultFieldTransform
+from cornucopia.cornucopia import RandomSlicewiseMulFieldTransform
 from cornucopia.cornucopia.random import Uniform, Fixed, RandInt
 
 
