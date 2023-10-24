@@ -20,7 +20,7 @@ from vesselsynth.vesselsynth.io import default_affine
 from vesselsynth.vesselsynth.synth import SynthVesselOCT
 from cornucopia.cornucopia.labels import RandomSmoothLabelMap
 from cornucopia.cornucopia.noise import RandomGammaNoiseTransform
-from cornucopia.cornucopia.intensity import RandomSlicewiseMulFieldTransform
+from cornucopia.cornucopia import RandomSlicewiseMultFieldTransform
 from cornucopia.cornucopia.random import Uniform, Fixed, RandInt
 
 
@@ -31,13 +31,14 @@ from torch.utils.data import Dataset
 import numpy as np
 
 
+
 class VesselSynth(object):
     """
     Synthesize 3D vascular network and save as nifti.
     """
     def __init__(self, device:str='cuda',
                  json_param_path:str='scripts/vesselsynth/vesselsynth_params.json',
-                 experiment_number=9):
+                 experiment_number=1):
         """
         Parameters
         ----------
@@ -49,7 +50,9 @@ class VesselSynth(object):
         # All JIT things need to be handled here. Do not put them outside this class.
         os.environ['PYTORCH_JIT_USE_NNC_NOT_NVFUSER'] = '1'
         os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-        backend.jitfields = True
+        import interpol
+        interpol.backend.jitfields=True
+        #backend.jitfields = True
 
         self.device = device
         self.json_params = json.load(open(json_param_path))   # This is the json file that should be one directory above this one. Defines all variables
