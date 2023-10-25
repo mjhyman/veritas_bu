@@ -1,4 +1,4 @@
-# 1 Installation
+ # 1 Installation
 Since I have limited space on my linux machine's hard drive, I will be installing and working with this project in the octdata2 partition of our network drive. This example lives in `/autofs/cluster/octdata2/users/epc28/veritas`, and you can use it as a reference at any time if you need.
 
 Just something to watchout for: I will be referring to the directory contianing my veritas project folder as the "base directory," which again, is `/autofs/cluster/octdata2/users/epc28/veritas`.

@@ -37,7 +37,7 @@ class VesselSynth(object):
     Synthesize 3D vascular network and save as nifti.
     """
     def __init__(self, device:str='cuda',
-                 json_param_path:str='scripts/vesselsynth/vesselsynth_params.json',
+                 json_param_path:str='scripts/1_vesselsynth/vesselsynth_params.json',
                  experiment_number=1):
         """
         Parameters
@@ -52,7 +52,7 @@ class VesselSynth(object):
         os.environ['CUDA_VISIBLE_DEVICES'] = '0'
         #import interpol
         #interpol.backend.jitfields=True
-        backend.jitfields = True
+        #backend.jitfields = True
 
         self.device = device
         self.json_params = json.load(open(json_param_path))   # This is the json file that should be one directory above this one. Defines all variables

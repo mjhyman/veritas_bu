@@ -23,7 +23,7 @@ class Options(object):
         self.cls = cls
         self.attribute_dict = self.cls.__dict__
 
-    def out_filepath(self):
+    def out_filepath(self, dir=None):
         """
         Determine out filename. Same dir as volume.
         """
@@ -35,7 +35,10 @@ class Options(object):
         except:
             pass
         stem += '.nii'
-        self.out_dir = f"/{self.attribute_dict['volume_dir']}/predictions"
+        if dir is None:
+            self.out_dir = f"/{self.attribute_dict['volume_dir']}/predictions"
+        else:
+            self.out_dir = dir
         self.full_path = f"{self.out_dir}/{stem}"
         return self.out_dir, self.full_path
 

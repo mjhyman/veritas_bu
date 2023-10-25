@@ -319,17 +319,22 @@ class RealOctPredict(RealOctPatchLoader, Dataset):
         self.imprint_tensor = self.imprint_tensor[s, s, s]
     
 
-    def save_prediction(self):
+    def save_prediction(self, dir=None):
         """
         Save prediction volume.
+
+        Parameters
+        ----------
+        dir : str
+            Directory to save volume. If None, it will save volume to same path.
         """
-        self.out_dir, self.out_fname = Options(self).out_filepath()
+        self.out_dir, self.full_path = Options(self).out_filepath(dir)
         os.makedirs(self.out_dir, exist_ok=True)
 
-        print(f"\nSaving prediction to {self.out_fname}...")
+        print(f"\nSaving prediction to {self.full_path}...")
         self.imprint_tensor = self.imprint_tensor.cpu().numpy()
         print(self.imprint_tensor.shape)
         print(self.imprint_tensor.max())
 
         out_nifti = nib.nifti1.Nifti1Image(dataobj=self.imprint_tensor, affine=self.volume_nifti.affine)
-        nib.save(out_nifti, self.out_fname)
+        nib.save(out_nifti, self.full_path)

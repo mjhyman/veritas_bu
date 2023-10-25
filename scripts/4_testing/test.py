@@ -12,14 +12,14 @@ if __name__ == "__main__":
         volume=volume,
         trainee=unet.trainee,
         patch_size=128,
-        step_size=32,
+        step_size=64,
         device='cuda',
         pad_=True,
         normalize=True
         )
     print('volume loaded...')
     prediction.predict_on_all()
-    prediction.save_prediction()
+    prediction.save_prediction(f"{unet.version_path}/predictions")
 
     t2 = time.time()
     print(f"Process took {round((t2-t1)/60, 2)} min")

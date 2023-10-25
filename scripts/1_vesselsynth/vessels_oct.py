@@ -1,6 +1,5 @@
-from veritas.synth import VesselSynth
 import torch
-
+from veritas.synth import VesselSynth
 torch.no_grad()
 
 if __name__ == "__main__":
