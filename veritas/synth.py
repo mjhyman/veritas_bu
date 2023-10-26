@@ -189,7 +189,7 @@ class OctVolSynth(nn.Module):
         """
         # Load JSON param file
         json_dict = JsonTools('scripts/2_imagesynth/imagesynth_params.json').read()
-        print(json_dict)
+        #print(json_dict)
         # Create the label map of parenchyma but convert to float32 for further computations
         # Add 1 so that we can work with every single pixel (no zeros)
         nb_classes_ = int(json_dict['parenchyma']['nb_classes'])
