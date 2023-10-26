@@ -13,9 +13,8 @@ import math as pymath
 import nibabel as nib
 
 # Custom Imports
-from veritas.utils import PathTools
+from veritas.utils import PathTools, JsonTools
 from vesselsynth.vesselsynth.utils import backend
-from vesselsynth.vesselsynth import SaveExp
 from vesselsynth.vesselsynth.io import default_affine
 from vesselsynth.vesselsynth.synth import SynthVesselOCT
 from cornucopia.cornucopia.labels import RandomSmoothLabelMap
@@ -188,18 +187,26 @@ class OctVolSynth(nn.Module):
         shape : int
             Number of spline control points
         """
+        # Load JSON param file
+        json_dict = JsonTools('scripts/2_imagesynth/imagesynth_params.json').read()
+        print(json_dict)
         # Create the label map of parenchyma but convert to float32 for further computations
         # Add 1 so that we can work with every single pixel (no zeros)
+        nb_classes_ = int(json_dict['parenchyma']['nb_classes'])
+        shape_ = int(json_dict['parenchyma']['shape'])
         parenchyma = RandomSmoothLabelMap(
-            nb_classes=Fixed(nb_classes),
-            shape=shape
+            nb_classes=Fixed(nb_classes_),
+            shape=shape_
             )(vessel_labels_tensor).to(self.dtype) + 1
         # Applying speckle noise model
+        noise_a = float(json_dict['noise'][0])
+        noise_b = float(json_dict['noise'][1])
         parenchyma = RandomGammaNoiseTransform(
-            sigma=Uniform(0.2, 0.4)
+            sigma=Uniform(noise_a, noise_b)
             )(parenchyma).to(self.dtype)[0]
         # Applying z-stitch artifact
-        parenchyma = RandomSlicewiseMulFieldTransform()(parenchyma)
+        thickness_ = int(json_dict['z_decay'][0])
+        parenchyma = RandomSlicewiseMulFieldTransform(thickness=thickness_)(parenchyma)
         return parenchyma
     
 
