@@ -41,7 +41,7 @@ class Unet(object):
         self.metrics = torch.nn.ModuleDict({'dice': self.losses[0]})
 
 
-    def load(self, backbone_dict=None):
+    def load(self, backbone_dict=None, type='best'):
         if backbone_dict is None:
             print(f'Loading backbone params from json...')
             self.backbone_dict = JsonTools(self.json_path).read()
@@ -52,6 +52,7 @@ class Unet(object):
             3, 1, 1, 3, activation=None, backbone='UNet',
             kwargs_backbone=self.backbone_dict
             )
+        torch.compile(self.segnet)
         
         trainee = train.SupervisedTrainee(
             network=self.segnet,
@@ -62,11 +63,19 @@ class Unet(object):
 
         if backbone_dict is None:
             print("Loading checkpoint...")
-            trainee = train.FineTunedTrainee.load_from_checkpoint(
-                checkpoint_path=Checkpoint(self.checkpoint_dir).last(),
-                trainee=trainee,
-                loss=self.losses
-                )
+            if type == 'best':
+                trainee = train.FineTunedTrainee.load_from_checkpoint(
+                    checkpoint_path=Checkpoint(self.checkpoint_dir).best(),
+                    trainee=trainee,
+                    loss=self.losses
+                    )
+            elif type == 'last':
+                trainee = train.FineTunedTrainee.load_from_checkpoint(
+                    checkpoint_path=Checkpoint(self.checkpoint_dir).last(),
+                    trainee=trainee,
+                    loss=self.losses
+                    )
+            
             trainee.to(self.device)
             print('Checkpoint loaded')
         else:
@@ -112,7 +121,7 @@ class Unet(object):
 
     def train_it(self, data_experiment_number, augmentation=None, train_to_val:float=0.8, batch_size:int=1,
                  epochs=1000, loader_device='cuda', check_val_every_n_epoch:int=5,
-                 accumulate_gradient_n_batches:int=5):
+                 accumulate_gradient_n_batches:int=5, subset=-1):
         """
         Train unet after defining or loading model.
         
@@ -145,7 +154,7 @@ class Unet(object):
         val_split = 1 - train_split
         seed = torch.Generator().manual_seed(42)
         label_paths = glob(f'output/synthetic_data/exp{data_experiment_number:04d}/*label*')
-        dataset = SynthVesselDataset(label_paths, device=loader_device, transform=self.augmentation)
+        dataset = SynthVesselDataset(label_paths, device=loader_device, transform=self.augmentation, subset=slice(subset))
         train_set, val_set = random_split(dataset, [train_split, val_split], seed)
 
         # Instance variables start
@@ -199,6 +208,7 @@ class Unet(object):
         n_processes = self.gpus
         self.segnet.share_memory()
         processes = []
+        #torch.cuda.empty_cache()
         for rank in range(n_processes):
             process = mp.Process(target=trainer_.fit(
                 self.trainee,

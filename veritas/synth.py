@@ -51,7 +51,7 @@ class VesselSynth(object):
         os.environ['CUDA_VISIBLE_DEVICES'] = '0'
         #import interpol
         #interpol.backend.jitfields=True
-        #backend.jitfields = True
+        backend.jitfields = True
 
         self.device = device
         self.json_params = json.load(open(json_param_path))   # This is the json file that should be one directory above this one. Defines all variables
@@ -157,6 +157,7 @@ class OctVolSynth(nn.Module):
         vessel_labels_tensor : tensor
             Tensor of vessels with unique ID integer labels
         """
+        vessel_labels_tensor = vessel_labels_tensor.to(torch.float16)
         # synthesize the main parenchyma (background tissue)
         parenchyma = self.parenchyma_(vessel_labels_tensor)
         # synthesize vessels (grouped by intensity)
