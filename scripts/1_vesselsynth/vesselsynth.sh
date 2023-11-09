@@ -1,5 +1,22 @@
 #!/bin/bash
-# dgx-a100, rtx8000, rtx6000
+# Project name
+#$ -P npbssmic
+# Time limit specification (same as Etienne's)
+#$ -l h_rt=1:00:00
+# job name
+#$ -N vesselsynth
+# Merge the error and output into a single file
+#$ -j y
+ 
+# Activating vesselsynth environment
+module load miniconda/23.5.2
+conda activate vesselsynth
+ 
+# Making sure we're in the veritas project folder
+cd /projectnb/npbssmic/s/mhyman/veritas_bu
 
-jobsubmit -A psoct -p dgx-a100 -m 10G -t 7-00:00:00 -c 32 -G 1 -o logs/vesselsynth.log python3 scripts/1_vesselsynth/vessels_oct.py;
-watch -n 0.1 "squeue -u $USER"
+# Add veritas to your python path
+export PYTHONPATH=/projectnb/npbssmic/s/mhyman/veritas_bu:$PYTHONPATH
+
+# Run py script and redirecting output stream to the log file
+python3 vessels_oct.py > /projectnb/npbssmic/s/mhyman/veritas_bu/logs/vesselsynth.log 2>&1
